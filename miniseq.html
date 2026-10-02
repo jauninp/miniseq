@@ -148,6 +148,8 @@
 .task-tabs{display:flex;gap:6px;margin:18px 0 12px;border-bottom:1px solid var(--line);padding-bottom:6px}.task-tabs button{font-size:14px;padding:7px 14px}.task-tabs button[aria-pressed=true]{background:var(--tint);color:var(--accent);font-weight:600}.review-help{font-size:12px;color:var(--muted);line-height:1.6;margin:6px 0 16px}.review-actions{display:flex;align-items:center;gap:5px}.review-actions button{font-size:11px}
 
 .review-source{display:block;font-size:11px;color:var(--muted);padding:0 5px 4px}.review-actions{white-space:normal}
+
+.status-WAITING{color:#b77926}
 </style>
 </head>
 <body>
@@ -168,7 +170,7 @@
     <div class="sidebar-bottom">
       <button data-action="help">? &nbsp; Guide & raccourcis</button>
       <button data-action="backup">↥ &nbsp; Sauvegardes</button>
-      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.01.2</div>
+      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.02.1</div>
     </div>
   </aside>
   <div class="workspace">
@@ -2826,14 +2828,14 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   function metadata(text) {
     const source = withoutCode(text), properties = Object.create(null);
     for (const match of source.matchAll(/^([\p{L}\w-]+)::[ \t]*(.*)$/gmu)) properties[key(match[1])] = match[2].trim();
-    const status = source.match(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|DONE|CANCELED)(?=\s|$)/)?.[1] || null;
-    const priority = source.match(/^(?:(?:BACKLOG|TODO|DOING|REVIEW|QUESTION|DONE|CANCELED)\s+)?\[#([ABC])\](?=\s|$)/)?.[1] || (/^[ABC]$/i.test(properties.priority || '') ? properties.priority.toUpperCase() : null);
+    const status = source.match(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?=\s|$)/)?.[1] || null;
+    const priority = source.match(/^(?:(?:BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)\s+)?\[#([ABC])\](?=\s|$)/)?.[1] || (/^[ABC]$/i.test(properties.priority || '') ? properties.priority.toUpperCase() : null);
     const rawDeadline = properties.deadline || source.match(/^DEADLINE:[ \t]*<?(\d{4}-\d{2}-\d{2})(?:[^\n]*)$/m)?.[1] || null;
     return { status, priority, deadline: validDate(rawDeadline) ? rawDeadline : null, properties };
   }
   function reviewInfo(block, page, today = dateKey()) {
     const meta=metadata(block.text);
-    if(!['BACKLOG','TODO','DOING','REVIEW','QUESTION'].includes(meta.status))return null;
+    if(!['BACKLOG','TODO','DOING','REVIEW','QUESTION', 'WAITING'].includes(meta.status))return null;
     const reviewed=validDate(meta.properties.reviewed) && meta.properties.reviewed<=today ? meta.properties.reviewed : '';
     const daysSince=date=>Math.floor((Date.parse(today+'T12:00:00Z')-Date.parse(date+'T12:00:00Z'))/86400000);
     if(reviewed===today)return null;
@@ -2854,9 +2856,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     }).join('\n');
   }
   function updateTask(text, { status, priority, deadline }) {
-    if (!['', 'BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION', 'DONE', 'CANCELED'].includes(status) || !['', 'A', 'B', 'C'].includes(priority) || (deadline && !validDate(deadline))) throw new Error('État, priorité ou date invalide.');
+    if (!['', 'BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION', 'WAITING', 'DONE', 'CANCELED'].includes(status) || !['', 'A', 'B', 'C'].includes(priority) || (deadline && !validDate(deadline))) throw new Error('État, priorité ou date invalide.');
     const lines = text.split('\n');
-    let first = lines.shift().replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|DONE|CANCELED)(?:[ \t]+|$)/, '').replace(/^\[#[ABC]\](?:[ \t]+|$)/, '');
+    let first = lines.shift().replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?:[ \t]+|$)/, '').replace(/^\[#[ABC]\](?:[ \t]+|$)/, '');
     first = (status ? status + ' ' : '') + (priority ? `[#${priority}] ` : '') + first;
     let fence = null;
     const rest = lines.filter(line => {
@@ -2906,7 +2908,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     const tokens = tokenize(expression.trim()); let pos = 0;
     let mode = tokens[0]?.toLowerCase() === 'pages' ? (tokens.shift(), 'pages') : 'blocks';
     // Property-only project queries naturally return each project page once.
-    if (tokens.some(t => /^type:/i.test(t)) && !tokens.some(t => /^(BACKLOG|TODO|DOING|REVIEW|QUESTION|DONE|CANCELED|task:|deadline|priority:|\[\[|#)/i.test(t))) mode = 'pages';
+    if (tokens.some(t => /^type:/i.test(t)) && !tokens.some(t => /^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED|task:|deadline|priority:|\[\[|#)/i.test(t))) mode = 'pages';
     if (!tokens.length) throw new Error('Écrivez un critère, par exemple TODO ou #idée.');
     const unquote = value => value.startsWith('"') ? JSON.parse(value) : value;
     function atom() {
@@ -2918,14 +2920,14 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       if (/^\[\[/.test(term)) { const name = key(term.slice(2, -2)); return c => c.links.has(name) || key(c.page.title) === name; }
       if (term.startsWith('@')) { const person=key(term.slice(1)); if(!person) throw new Error('Personne manquante.'); return c => mentions(c.text).includes(person); }
       if (term.startsWith('#')) { const tag = key(term.slice(1)); if (!tag) throw new Error('Tag manquant.'); return c => c.tags.has(tag); }
-      if (['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION', 'DONE', 'CANCELED'].includes(term.toUpperCase())) { const state = term.toUpperCase(); return c => c.meta.status === state; }
+      if (['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION', 'WAITING', 'DONE', 'CANCELED'].includes(term.toUpperCase())) { const state = term.toUpperCase(); return c => c.meta.status === state; }
       const colon = term.indexOf(':');
       if (colon > 0 && !term.startsWith('"')) {
         const field = key(term.slice(0, colon)), value = unquote(term.slice(colon + 1)), normalized = key(value);
         if (!value) throw new Error('Valeur manquante pour ' + field + '.');
         if (field === 'task') {
-          if (!['open', 'backlog', 'todo', 'doing', 'review', 'question', 'done', 'canceled', 'any'].includes(normalized)) throw new Error('task attend open, TODO, DOING, DONE ou any.');
-          return c => normalized === 'any' ? !!c.meta.status : normalized === 'open' ? ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION'].includes(c.meta.status) : c.meta.status === normalized.toUpperCase();
+          if (!['open', 'backlog', 'todo', 'doing', 'review', 'question', 'waiting', 'done', 'canceled', 'any'].includes(normalized)) throw new Error('task attend open, TODO, DOING, DONE ou any.');
+          return c => normalized === 'any' ? !!c.meta.status : normalized === 'open' ? ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION', 'WAITING'].includes(c.meta.status) : c.meta.status === normalized.toUpperCase();
         }
         if (field === 'priority') { if (!['a', 'b', 'c', 'none'].includes(normalized)) throw new Error('Priorité attendue : A, B, C ou none.'); return c => (c.meta.priority || 'NONE') === normalized.toUpperCase(); }
         if (field === 'deadline') {
@@ -3052,7 +3054,7 @@ const Storage = {
   const pagesView = { kind: 'all' };
   MiniTables.configure({ getWidths: name => graph?.settings.tableWidths?.[name], saveWidths: (name, widths) => { graph.settings.tableWidths ||= {}; graph.settings.tableWidths[name] = widths; changed(); } });
   let pageTable = null, blockTable = null;
-  const taskStates = [['BACKLOG', 'Backlog', '▤'], ['TODO', 'À faire', '○'], ['DOING', 'En cours', '◐'], ['REVIEW', 'En revue', '↪'], ['QUESTION', 'Question', '？'], ['DONE', 'Terminé', '✓'], ['CANCELED', 'Annulé', '⊗']];
+  const taskStates = [['BACKLOG', 'Backlog', '▤'], ['TODO', 'À faire', '○'], ['DOING', 'En cours', '◐'], ['REVIEW', 'En revue', '↪'], ['QUESTION', 'Question', '？'], ['WAITING', 'En attente', '◷'], ['DONE', 'Terminé', '✓'], ['CANCELED', 'Annulé', '⊗']];
   const taskIcon = status => taskStates.find(s => s[0] === status)?.[2] || '○';
   const taskLabel = status => taskStates.find(s => s[0] === status)?.[1] || status;
   const pendingDeletions = new Map();
@@ -3111,7 +3113,7 @@ const Storage = {
     if (!block.text) return '';
     const query = MiniQuery.queryText(block.text);
     if (query !== null) return `<section class="query-box"><header><span>⌘ Requête</span><button data-edit="${block.id}" title="Modifier la requête"><code>${esc(query)}</code> ✎</button></header><div class="query-results" data-query-owner="${block.id}">${queryResults(query, block.id)}</div></section>`;
-    const task = block.text.match(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|DONE|CANCELED)(?:[ \t]+\[#([ABC])\])?(?=\s|$)[ \t]*/);
+    const task = block.text.match(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?:[ \t]+\[#([ABC])\])?(?=\s|$)[ \t]*/);
     if (task) {
       const status = task[1];
       return `<button class="task-toggle status-${status}" data-task="${block.id}" aria-label="Définir le statut : ${taskLabel(status)}">${taskIcon(status)}</button><span class="task-content ${['DONE', 'CANCELED'].includes(status) ? 'done-text' : ''}">${MiniMarkdown.render(taskDisplayText(block.text).slice(task[0].length), task[0].length)}</span>${taskBadges(block, true)}`;
@@ -3159,6 +3161,7 @@ const Storage = {
     });
     if ($('#explorer-results')) refreshSearch();
     if ($('#review-task-results')) blockTable?.replace(reviewTaskRows());
+    if ($('#waiting-results')) blockTable?.replace(blockRows(index().run('task:waiting').results));
     if ($('#task-results')) blockTable?.replace(blockRows(index().run(taskExpression()).results));
     if ($('#tag-blocks')) blockTable?.replace(blockRows(directTagResults()));
     if ($('#tags-table')) blockTable?.replace(tagRows());
@@ -3172,7 +3175,7 @@ const Storage = {
   function taskExpression() { return [taskFilter.state, taskFilter.deadline, taskFilter.priority].filter(Boolean).join(' '); }
   function optionHTML(options, selected) { return options.map(([value, label]) => `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(label)}</option>`).join(''); }
   function blockRows(results) {
-    return results.filter(r => r.block).map(r => ({ id: r.block.id, title: r.block.text.split('\n')[0].replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|DONE|CANCELED)(?:[ \t]+\[#[ABC]\])?[ \t]*/, ''),
+    return results.filter(r => r.block).map(r => ({ id: r.block.id, title: r.block.text.split('\n')[0].replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?:[ \t]+\[#[ABC]\])?[ \t]*/, ''),
       page: r.page.title, pageId: r.page.id, status: r.meta.status || '', priority: r.meta.priority || '', deadline: r.meta.deadline || '', tags: [...r.tags].sort().map(t => '#' + t).join(' '), people: MiniQuery.mentions(r.block.text).map(p=>'@'+p).join(' '), created:r.block.createdAt||'', updated:r.block.updatedAt||'', closed:r.meta.properties.closed||'' }));
   }
   function blockColumns() {
@@ -3200,7 +3203,7 @@ const Storage = {
       for (const tag of new Set(references(b.text).tags.map(key))) {
         if (!summary.has(tag)) summary.set(tag, { id: tag, tag, blocks: 0, pages: new Set(), tasks: 0 });
         const row = summary.get(tag); row.blocks++; row.pages.add(b.pageId);
-        if (['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION'].includes(context.meta.status)) row.tasks++;
+        if (['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION', 'WAITING'].includes(context.meta.status)) row.tasks++;
       }
     }
     return [...summary.values()].map(row => ({ ...row, pages: row.pages.size }));
@@ -3225,13 +3228,20 @@ const Storage = {
     blockTable = MiniTables.mount('#tag-blocks', 'tag-blocks', blockColumns(), blockRows(directTagResults()), [{ column: 'page', dir: 'asc' }]);
   }
   function renderTasks() {
+    if(tasksMode==='waiting'){renderWaitingTasks();return;}
     if(tasksMode==='review'){renderReviewTasks();return;}
     $('#crumb').textContent = 'Tâches';
     $('#main').innerHTML = `<div class="eyebrow">Retrouver & avancer</div><h1>Mes tâches</h1>${taskTabs()}<p class="page-subtitle">Toutes vos tâches, à leur place dans vos notes. Les changements ici modifient le bloc d’origine.</p><div class="filter-bar"><label>État<select id="task-state">${optionHTML([['task:open', 'Non terminées'], ...taskStates.map(([id, label]) => [id, label]), ['task:any', 'Tous les états']], taskFilter.state)}</select></label><label>Relance<select id="task-deadline">${optionHTML([['', 'Toutes les relances'], ['(deadline:today OR deadline:overdue)', 'À traiter : aujourd’hui et en retard'], ['deadline:today', 'Aujourd’hui'], ['deadline:overdue', 'En retard'], ['deadline:soon', 'Les 7 prochains jours'], ['deadline:none', 'Sans relance']], taskFilter.deadline)}</select></label><label>Priorité<select id="task-priority">${optionHTML([['', 'Toutes les priorités'], ['priority:A', 'A · Haute'], ['priority:B', 'B · Moyenne'], ['priority:C', 'C · Basse'], ['priority:none', 'Sans priorité']], taskFilter.priority)}</select></label></div><div class="query-caption"><code id="task-expression">${esc(taskExpression())}</code><button data-action="save-task-query">Garder cette vue dans une page ↗</button></div><div id="task-results"></div>`;
     blockTable = MiniTables.mount('#task-results', 'tasks', blockColumns(), blockRows(index().run(taskExpression()).results), [{ column: 'deadline', dir: 'asc' }, { column: 'priority', dir: 'asc' }]);
   }
   function taskTabs() {
-    return `<nav class="task-tabs" aria-label="Vues des tâches"><button data-action="tasks-all" aria-pressed="${tasksMode==='all'}">Toutes les tâches</button><button data-action="tasks-review" aria-pressed="${tasksMode==='review'}">Relance</button></nav>`;
+    return `<nav class="task-tabs" aria-label="Vues des tâches"><button data-action="tasks-all" aria-pressed="${tasksMode==='all'}">Toutes les tâches</button><button data-action="tasks-review" aria-pressed="${tasksMode==='review'}">Relance</button><button data-action="tasks-waiting" aria-pressed="${tasksMode==='waiting'}">En attente</button></nav>`;
+  }
+  function renderWaitingTasks() {
+    $('#crumb').textContent='Tâches · En attente';
+    $('#main').innerHTML=`<h1>Mes tâches</h1>${taskTabs()}<p class="page-subtitle">Les réponses et éléments que vous attendez. Mentionnez la personne avec @nom et ajoutez une relance si nécessaire.</p><div id="waiting-results"></div>`;
+    const columns=blockColumns(),people=columns.find(c=>c.field==='people');
+    blockTable=MiniTables.mount('#waiting-results','tasks-waiting',[columns[0],people,...columns.slice(1).filter(c=>c!==people)],blockRows(index().run('task:waiting').results),[{column:'deadline',dir:'asc'},{column:'created',dir:'asc'}]);
   }
   function reviewTaskRows() {
     return blockRows(index().run('task:open').results).flatMap(row=>{
@@ -3283,7 +3293,7 @@ const Storage = {
   }
   function searchPlan() {
     const text=explorerQuery.trim();
-    const advanced=searchMode==='query'||(searchMode==='auto'&&/(?:^|[\s(])-?(?:[#@]|\[\[|(?:[\p{L}\w-]+):(?!\/\/)|(?:TODO|BACKLOG|DOING|REVIEW|QUESTION|DONE|CANCELED)(?=\s|$)|pages(?=\s)|deadline(?=\s))/iu.test(text));
+    const advanced=searchMode==='query'||(searchMode==='auto'&&/(?:^|[\s(])-?(?:[#@]|\[\[|(?:[\p{L}\w-]+):(?!\/\/)|(?:TODO|BACKLOG|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?=\s|$)|pages(?=\s)|deadline(?=\s))/iu.test(text));
     try { return {text,advanced,expression:advanced?text:MiniQuery.textExpression(text)}; } catch(error) { return {text,advanced,expression:text,error:error.message}; }
   }
   function refreshSearch() {
@@ -3310,7 +3320,7 @@ const Storage = {
   function projectInfo(page) {
     const idx = index(), properties = idx.pageProperties.get(page.id) || {};
     const related = graph.blocks.filter(b => MiniQuery.queryText(b.text) === null && (b.pageId === page.id || idx.context(b).links.has(key(page.title))));
-    const open = related.filter(b => ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION'].includes(idx.meta.get(b.id).status))
+    const open = related.filter(b => ['BACKLOG', 'TODO', 'DOING', 'REVIEW', 'QUESTION', 'WAITING'].includes(idx.meta.get(b.id).status))
       .sort((a,b) => (idx.meta.get(a.id).deadline || '9999').localeCompare(idx.meta.get(b.id).deadline || '9999') || (idx.meta.get(a.id).priority || 'Z').localeCompare(idx.meta.get(b.id).priority || 'Z') || a.order-b.order);
     const next = open[0], deadline = next ? idx.meta.get(next.id).deadline || '' : '';
     const activity = related.filter(b => b.text.trim()).map(b => b.updatedAt?.slice(0,10) || graph.page(b.pageId)?.journalDate || '').filter(Boolean).sort().at(-1) || '';
@@ -3886,6 +3896,8 @@ const Storage = {
       items = [
         { name: 'date', label: 'Date du jour · ' + dateKey(), text: dateKey() },
         { name: 'todo', label: 'TODO · Nouvelle tâche', text: 'TODO ' },
+        { name: 'attente', label: 'En attente · Réponse ou élément attendu', text: 'WAITING ' },
+        { name: 'waiting', label: 'En attente · Réponse ou élément attendu', text: 'WAITING ' },
         { name: 'question', label: 'Question · À clarifier', text: 'QUESTION ' },
         { name: 'doing', label: 'DOING · En cours', text: 'DOING ' },
         { name: 'query', label: 'Requête dynamique', text: '{{query task:open}}' },
@@ -4022,7 +4034,7 @@ const Storage = {
     }
     return {pagePeople, rows:graph.blocks.filter(b=>b.text.trim() && MiniQuery.queryText(b.text)===null).map(b=>({block:b,page:graph.page(b.pageId),meta:idx.meta.get(b.id),people:people(b)}))};
   }
-  const openTask = r => ['BACKLOG','TODO','DOING','REVIEW', 'QUESTION'].includes(r.meta.status);
+  const openTask = r => ['BACKLOG','TODO','DOING','REVIEW', 'QUESTION', 'WAITING'].includes(r.meta.status);
   const personDate = r => r.page.journalDate || r.block.createdAt?.slice(0,10) || '';
   function peopleRows() {
     const {pagePeople,rows}=personContexts(), summary=new Map();
@@ -4047,7 +4059,7 @@ const Storage = {
   }
   let personLimit=40;
   function personResults(rows, empty) {
-    return rows.map(r=>`<div class="query-result" data-person-block="${r.block.id}">${r.meta.status?`<button class="task-toggle status-${r.meta.status}" data-task="${r.block.id}" aria-label="Définir le statut : ${esc(taskLabel(r.meta.status))}">${taskIcon(r.meta.status)}</button>`:'<span class="query-dot">•</span>'}<button class="result" data-jump="${r.block.id}"><span class="source">${esc(pageLabel(r.page))}</span><span class="excerpt ${['DONE','CANCELED'].includes(r.meta.status)?'done-text':''}">${esc(taskDisplayText(r.block.text).replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|DONE|CANCELED)\s+/,''))}</span></button>${r.meta.status?taskBadges(r.block):''}</div>`).join('') || `<p class="empty">${empty}</p>`;
+    return rows.map(r=>`<div class="query-result" data-person-block="${r.block.id}">${r.meta.status?`<button class="task-toggle status-${r.meta.status}" data-task="${r.block.id}" aria-label="Définir le statut : ${esc(taskLabel(r.meta.status))}">${taskIcon(r.meta.status)}</button>`:'<span class="query-dot">•</span>'}<button class="result" data-jump="${r.block.id}"><span class="source">${esc(pageLabel(r.page))}</span><span class="excerpt ${['DONE','CANCELED'].includes(r.meta.status)?'done-text':''}">${esc(taskDisplayText(r.block.text).replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)\s+/,''))}</span></button>${r.meta.status?taskBadges(r.block):''}</div>`).join('') || `<p class="empty">${empty}</p>`;
   }
   function refreshPerson() {
     if(!$('#person-tasks'))return;
@@ -4098,7 +4110,7 @@ const Storage = {
       const day=pageDate(page);if(!day)continue;
       const blocks=graph.blocks.filter(b=>b.pageId===page.id&&b.text.trim());
       if(page.journalDate&&!blocks.length)continue;
-      const active=blocks.some(b=>['BACKLOG','TODO','DOING','REVIEW', 'QUESTION'].includes(MiniQuery.metadata(b.text).status));
+      const active=blocks.some(b=>['BACKLOG','TODO','DOING','REVIEW', 'QUESTION', 'WAITING'].includes(MiniQuery.metadata(b.text).status));
       if(active||!marked.has(day))marked.set(day,active?'open':'notes');
     }
     showDialog('Calendrier', `<div class="calendar-head"><button id="calendar-prev" aria-label="Mois précédent">‹</button><strong>${esc(first.toLocaleDateString('fr-CH',{month:'long',year:'numeric'}))}</strong><button id="calendar-next" aria-label="Mois suivant">›</button></div><div class="calendar-grid">${['Lu','Ma','Me','Je','Ve','Sa','Di'].map(d=>'<span>'+d+'</span>').join('')}${'<span></span>'.repeat(offset)}${Array.from({length:days},(_,i)=>{const day=month+'-'+String(i+1).padStart(2,'0'),kind=marked.get(day);return `<button data-calendar-day="${day}" aria-label="${day}${kind==='open'?', tâches actives':kind?', notes ou pages':''}" class="${day===dateKey()?'calendar-today':''}">${i+1}${kind?`<i class="calendar-dot ${kind}"></i>`:''}</button>`;}).join('')}</div><p class="empty">● Vert : notes ou pages datées · 🟠 Orange : tâche encore active</p>`);
@@ -4193,6 +4205,7 @@ const Storage = {
   const actions = {
     people: () => { view={type:'people'};render(); },
     'tasks-all': () => {tasksMode='all';render();},
+    'tasks-waiting': () => {tasksMode='waiting';render();},
     'tasks-review': () => {tasksMode='review';render();},
     'page-properties': pageProperties,
     'rename-page': () => renamePage(),
