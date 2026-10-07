@@ -172,7 +172,7 @@
     <div class="sidebar-bottom">
       <button data-action="help">? &nbsp; Guide & raccourcis</button>
       <button data-action="backup">↥ &nbsp; Sauvegardes</button>
-      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.04.2</div>
+      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.07.1</div>
     </div>
   </aside>
   <div class="workspace">
@@ -2675,6 +2675,22 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       this.blocks.push(...structuredClone(deleted.blocks));
       if (deleted.favorite) this.settings.favorites = [...new Set([...(this.settings.favorites || []), deleted.page.id])];
     }
+    mergeBlocks(firstId, secondId) {
+      const first = this.block(firstId), second = this.block(secondId);
+      if (!first || !second || firstId === secondId || first.pageId !== second.pageId) return null;
+      // Only join forward neighbours; never remove an ancestor of the retained block.
+      const visible = this.visible(first.pageId).map(x => x.block.id);
+      if (visible[visible.indexOf(firstId) + 1] !== secondId) return null;
+      const cursor = first.text.length;
+      this.setText(firstId, first.text + second.text);
+      const siblings = this.children(second.pageId, second.parentId), position = siblings.indexOf(second);
+      const children = this.children(second.pageId, secondId);
+      children.forEach(child => { child.parentId = second.parentId; child.updatedAt = new Date().toISOString(); });
+      siblings.splice(position, 1, ...children);
+      this.blocks = this.blocks.filter(block => block.id !== secondId);
+      this.normalize(siblings);
+      return { id: firstId, cursor };
+    }
     removeEmpty(id) {
       const b = this.block(id); if (b.text) return false;
       const siblings = this.children(b.pageId, b.parentId), i = siblings.indexOf(b);
@@ -3870,6 +3886,22 @@ const Storage = {
       changed(); renderBlocks(next.id, 0);
     } else if (e.key === 'Tab') {
       e.preventDefault(); checkpoint(); graph.indent(id, e.shiftKey); changed(); renderBlocks(id, start);
+    } else if (plainKey && !e.shiftKey && start === end && ((e.key === 'Delete' && end === input.value.length) || (e.key === 'Backspace' && start === 0))) {
+      const scope = activeHost?.closest('.reference-blocks, [data-journal-blocks], #pinned-blocks') || $('#blocks');
+      const list = [...scope.querySelectorAll('[data-block]')].map(row => row.dataset.block);
+      const nextId = list[list.indexOf(id) + (e.key === 'Delete' ? 1 : -1)];
+      const next = graph.block(nextId);
+      if (next && next.pageId === b.pageId) {
+        e.preventDefault(); checkpoint();
+        const merged = e.key === 'Delete' ? graph.mergeBlocks(id, nextId) : graph.mergeBlocks(nextId, id);
+        if (merged) {
+          if (merged.id === id) { input.value = graph.block(id).text; resize(input); dismissCompletions(input); }
+          changed(); renderBlocks(merged.id, merged.cursor);
+        }
+      } else if (e.key === 'Backspace' && !b.text) {
+        e.preventDefault(); checkpoint();
+        if (graph.removeEmpty(id)) { changed(); renderBlocks(graph.children(b.pageId)[0]?.id); }
+      }
     } else if (e.key === 'Backspace' && !b.text) {
       e.preventDefault(); const visible = graph.visible(b.pageId).map(x => x.block.id), i = visible.indexOf(id);
       checkpoint(); if (graph.removeEmpty(id)) { changed(); renderBlocks(graph.block(id) ? id : visible[i - 1] || graph.children(b.pageId)[0]?.id); }
