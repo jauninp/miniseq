@@ -194,7 +194,7 @@
     <div class="sidebar-bottom">
       <button data-action="help">? &nbsp; Guide & raccourcis</button>
       <button data-action="backup">↥ &nbsp; Sauvegardes</button>
-      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.09.2</div>
+      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.12.1</div>
     </div>
   </aside>
   <div class="workspace">
@@ -3338,7 +3338,7 @@ const Storage = {
   let queryIndex = null, queryRevision = -1, taskFilter = { state: 'task:open', deadline: '', priority: '' };
   let projectFilter = 'active', tasksMode = 'all';
   let explorerQuery = '', searchMode = 'auto';
-  const pagesView = { kind: 'all' };
+  const pagesView = { kind: 'all', status: 'all' };
   MiniTables.configure({ getWidths: name => graph?.settings.tableWidths?.[name], saveWidths: (name, widths) => { graph.settings.tableWidths ||= {}; graph.settings.tableWidths[name] = widths; changed(); } });
   let pageTable = null, blockTable = null;
   const taskStates = [['BACKLOG', 'Backlog', '▤'], ['TODO', 'À faire', '○'], ['DOING', 'En cours', '◐'], ['REVIEW', 'En revue', '↪'], ['QUESTION', 'Question', '？'], ['WAITING', 'En attente', '◷'], ['DONE', 'Terminé', '✓'], ['CANCELED', 'Annulé', '⊗']];
@@ -3602,7 +3602,7 @@ const Storage = {
     $('#search-input').oninput=e=>{explorerQuery=e.target.value;$('#global-search').value=explorerQuery;syncSearchClear();refreshSearch();};
     refreshQueries();
   }
-  const projectStates = [['active', 'En cours'], ['waiting', 'En attente'], ['done', 'Terminé'], ['canceled', 'Annulé']];
+  const projectStates = [['active', 'En cours'], ['waiting', 'En attente'], ['done', 'Terminé'], ['canceled', 'Annulé'], ['archived', 'Archivé']];
   function isProject(id) { return key(index().pageProperties.get(id)?.type || '') === 'project'; }
   function projectInfo(page) {
     const idx = index(), properties = idx.pageProperties.get(page.id) || {};
@@ -3659,11 +3659,15 @@ const Storage = {
       <p id="pages-count" class="pages-count" role="status"></p>
       <div id="pages-table" aria-label="Tableau des pages"></div><p class="table-hint">Cliquez sur un en-tête pour trier · Maj + clic pour combiner les tris · Glissez les séparateurs pour ajuster les colonnes.</p>`;
     $('#pages-kind').addEventListener('change', e => { pagesView.kind = e.target.value; refreshPages(); });
+    const statusFilter = document.createElement('label'); statusFilter.innerHTML = `Statut<select id="pages-status">${optionHTML([['all','Tous'],['current','Hors archives'],['archived','Archives']],pagesView.status)}</select>`;
+    $('.pages-toolbar').append(statusFilter);
+    $('#pages-status').addEventListener('change', e => { pagesView.status = e.target.value; refreshPages(); });
     pageTable = MiniTables.mount('#pages-table', 'pages', [
       { title: 'Nom de la page', field: 'title', minWidth: 240, widthGrow: 3, sorter: 'string', sorterParams: { locale: 'fr' }, formatter: cell => MiniTables.action(cell.getValue(), 'data-page', cell.getRow().getData().id) },
       { title: 'Références', field: 'links', sorter: 'number', hozAlign: 'right' },
       { title: 'Blocs', field: 'blocks', sorter: 'number', hozAlign: 'right' },
       { title: 'Type', field: 'kind' },
+      { title: 'Statut', field: 'status' },
       {title:'Création',field:'created',minWidth:165,formatter:dateCell},
       {title:'Mise à jour',field:'updated',minWidth:165,formatter:dateCell},
       {title:'Propriétés',field:'properties',minWidth:200},
@@ -3706,11 +3710,14 @@ const Storage = {
     const normalize = value => key(value).normalize('NFD').replace(/\p{M}/gu, '');
     const rows = pages.map(page => {
       const project = key(index().pageProperties.get(page.id)?.type || '') === 'project';
+      const statusKey = key(index().pageProperties.get(page.id)?.status || '');
       return { id: page.id, title: page.title, blocks: blockCounts.get(page.id) || 0, links: linkCounts.get(key(page.title)) || 0,
+        statusKey, status: projectStates.find(([value])=>value===statusKey)?.[1] || statusKey,
         created:page.createdAt||'', updated:[page.updatedAt||'',...graph.blocks.filter(b=>b.pageId===page.id).map(b=>b.updatedAt||'')].sort().at(-1)||'', properties:Object.entries(page.properties||{}).map(([k,v])=>k+': '+v).join(' · '), kind: page.journalDate ? 'Journal' : page.properties?.type || (project ? 'Projet' : 'Page'), project, journal: !!page.journalDate };
     }).filter(row => (pagesView.kind === 'all' || pagesView.kind === 'pages' && !row.journal || pagesView.kind === 'journals' && row.journal || pagesView.kind === 'projects' && row.project));
-    $('#pages-count').textContent = `${rows.length} pages sur ${pages.length}`;
-    return rows;
+    const filtered = rows.filter(row => pagesView.status === 'all' || (pagesView.status === 'archived' ? row.statusKey === 'archived' : row.statusKey !== 'archived'));
+    $('#pages-count').textContent = `${filtered.length} pages sur ${pages.length}`;
+    return filtered;
   }
   function refreshPages() { if ($('#pages-table')) pageTable?.replace(pageRows()); }
   function pageLabel(page) {
@@ -4230,11 +4237,12 @@ const Storage = {
         { name: 'question', label: 'Question · À clarifier', text: 'QUESTION ' },
         { name: 'doing', label: 'DOING · En cours', text: 'DOING ' },
         { name: 'query', label: 'Requête dynamique', text: '{{query task:open}}' },
-        { name: 'deadline', label: 'Relance', text: 'deadline::' + dateKey() },
+        { name: 'deadline', label: 'Relance · choisir une date au clavier', action: 'reminder' },
+        { name: 'rappel', label: 'Rappel · choisir une date au clavier', action: 'reminder' },
         { name: 'priority', label: 'Priorité haute', text: 'priority::A' },
         { name: 'code', label: 'Bloc de code · indiquez le langage après ```', text: '```\n\n```', cursor: 3 },
         { name: 'calc', label: 'Calculs · résultats à droite', text: '```calc\n\n```', cursor: 8 }
-      ].filter(item => (lineCommand || item.name === 'date') && item.name.startsWith(command[1].toLowerCase()));
+      ].filter(item => (lineCommand || ['date','rappel'].includes(item.name)) && item.name.startsWith(command[1].toLowerCase()));
     } else return;
     if (!items.length) return;
     completion = { id, items, from, to: input.selectionEnd + suffix.length, selected: 0 }; paintCompletions(input);
@@ -4252,9 +4260,38 @@ const Storage = {
   function applyCompletion(input, selected) {
     if (!completion) return;
     const { id, items, from, to } = completion, item = items[selected];
+    if (item.action === 'reminder') { dismissCompletions(input); reminderDate(id,from,to,input.selectionStart); return; }
     checkpoint(); input.setRangeText(item.text, from, to, 'end');
     if (item.cursor !== undefined) input.setSelectionRange(from + item.cursor, from + item.cursor);
-    graph.setText(id, input.value); changed(); resize(input); dismissCompletions(input); input.focus();
+    graph.setText(id, input.value); changed(); syncCodeEditor(input); resize(input); dismissCompletions(input); input.focus();
+  }
+  function reminderDate(id, from, to, cursor) {
+    const host = activeHost, block = graph.block(id); if (!block) return;
+    const originalText = block.text;
+    let applied = false;
+    const addDays = days => { const date = new Date(); date.setDate(date.getDate()+days); return dateKey(date); };
+    showDialog('Date du rappel', `<form id="reminder-date-form"><div id="reminder-date-shortcuts">${[[0,'Aujourd’hui'],[1,'Demain'],[7,'Dans une semaine']].map(([days,label])=>`<button type="button" data-reminder-date="${addDays(days)}">${label}</button>`).join('')}<button type="button" id="reminder-custom">Autre date…</button></div><p><label>Date<input id="reminder-date" type="date" required value="${MiniQuery.metadata(block.text).deadline || dateKey()}"></label></p><div class="dialog-actions"><button type="button" data-action="close">Annuler</button><button class="primary">Appliquer</button></div></form>`);
+    const apply = date => {
+      if (!validDate(date)) { notice('Choisissez une date valide.'); return; }
+      const source = MiniQuery.normalizeProperties(MiniQuery.convertTodo(originalText.slice(0,from)+originalText.slice(to))), meta = MiniQuery.metadata(source);
+      checkpoint(); graph.setText(id,MiniQuery.updateTask(source,{status:meta.status || 'TODO',priority:meta.priority || '',deadline:date}));
+      applied = true; changed(); dialog.close(); refreshQueries();
+    };
+    $('#reminder-date-form').onsubmit = e => { e.preventDefault(); apply($('#reminder-date').value); };
+    $('#reminder-date-shortcuts').querySelectorAll('[data-reminder-date]').forEach(button => button.onclick = () => apply(button.dataset.reminderDate));
+    $('#reminder-custom').onclick = () => $('#reminder-date').focus();
+    $('#reminder-date-shortcuts').onkeydown = e => {
+      if (e.key === 'Enter' && e.target.matches('button')) { e.preventDefault(); e.target.click(); return; }
+      if (!['ArrowDown','ArrowUp'].includes(e.key)) return;
+      e.preventDefault(); const buttons = [...e.currentTarget.querySelectorAll('button')], i = buttons.indexOf(document.activeElement);
+      buttons[(i+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length].focus();
+    };
+    dialog.addEventListener('close', () => {
+      if (!graph.block(id)) return;
+      if (applied) renderBlocks(id,Math.min(from,graph.block(id).text.length));
+      else if (host?.isConnected) { edit(id,cursor,host); const input = host.querySelector('.editor'); if (input) showCompletions(input,id); }
+    }, {once:true});
+    $('#reminder-date-shortcuts button').focus();
   }
   function clickedCursor(event, rendered) {
     if (!event.detail || !rendered?.matches('.rendered')) return null;
@@ -4338,6 +4375,22 @@ const Storage = {
   function pageProperties() {
     const page=graph.page(view.id);if(!page)return;
     showDialog('Propriétés de la page', `<form id="properties-form"><p>${esc(page.title)}</p><label>Propriétés (une par ligne : clé::valeur)<textarea id="page-properties" rows="7">${esc(Object.entries({...index().pageProperties.get(page.id),...page.properties}).map(([k,v])=>k+'::'+v).join('\n'))}</textarea></label><p class="empty">Exemples : type::entretien, personne::@Daniel, fréquence::hebdomadaire, date::2026-09-18. Tapez /date puis Entrée ou Tab pour insérer la date du jour.</p><div class="dialog-actions"><button type="button" data-action="close">Annuler</button><button class="primary">Enregistrer</button></div></form>`);
+    const statusLabel = document.createElement('label');
+    const currentStatus = index().pageProperties.get(page.id)?.status || '';
+    const statuses = [['','Non renseigné'],...projectStates];
+    if (currentStatus && !statuses.some(([value])=>value===currentStatus)) statuses.push([currentStatus,currentStatus]);
+    statusLabel.innerHTML = `Statut de la page<select id="page-status">${optionHTML(statuses,currentStatus)}</select>`;
+    $('#page-properties').parentElement.before(statusLabel);
+    $('#page-status').onchange = e => {
+      const input = $('#page-properties'), lines = input.value.split('\n').filter(line=>!/^status::/i.test(line));
+      if (e.target.value) lines.push('status::'+e.target.value);
+      input.value = lines.filter(line=>line.trim()).join('\n');
+    };
+    $('#page-properties').addEventListener('input', e => {
+      const status = e.target.value.match(/^status::\s*(.*)$/mi)?.[1] || '';
+      if (![...$('#page-status').options].some(option=>option.value===status)) $('#page-status').add(new Option(status,status));
+      $('#page-status').value = status;
+    });
     $('#page-properties').addEventListener('keydown', e => {
       if (e.isComposing || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey || !['Enter', 'Tab'].includes(e.key)) return;
       const input = e.target, cursor = input.selectionStart;
