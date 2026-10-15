@@ -29,6 +29,8 @@
 @media(pointer:coarse){.block-row{margin-top:10px}}
 
 /* Markdown documents, live query views and task metadata. */
+#notice:has(.notice-copy){padding:0}
+#notice .notice-copy{display:block;width:100%;padding:10px 14px;text-align:left;font:inherit;border-radius:0}
 .rendered{white-space:normal}
 .rendered p{margin:0 0 7px;white-space:pre-wrap}
 .rendered p:last-child{margin-bottom:0}
@@ -194,7 +196,7 @@
     <div class="sidebar-bottom">
       <button data-action="help">? &nbsp; Guide & raccourcis</button>
       <button data-action="backup">↥ &nbsp; Sauvegardes</button>
-      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.12.1</div>
+      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.15.2</div>
     </div>
   </aside>
   <div class="workspace">
@@ -241,7 +243,7 @@
     toolbar.append(input,reset,error); host.before(toolbar);
     const fields = columns.filter(c => c.field && c.field !== 'actions').map(c => c.field);
     let matcher = root.MiniQuery.textFilter(input.value);
-    const filter = row => matcher.matches(fields.map(field=>row[field]??'').join(' '));
+    const filter = row => matcher.matches([...fields.map(field=>row[field]??''),row.reperes||''].join(' '));
     input.oninput = () => { reset.hidden=!input.value; matcher=root.MiniQuery.textFilter(input.value);error.textContent=matcher.error||''; if (ready) table.setFilter(filter); };
     host.classList.add('notes-table');
     const table = new Tabulator(host, {
@@ -2529,6 +2531,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   const uid = () => globalThis.crypto.randomUUID();
   const dateKey = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
   const validDate = value => typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value) && dateKey(new Date(value + 'T12:00:00')) === value;
+  const validRepere = value => typeof value === 'string' && /^\d{6}-[2-9A-HJ-NP-Z]{3,32}$/.test(value);
+  const blockReperes = block => [...new Set([block?.repere,...(block?.repereAliases || [])].filter(Boolean))];
   const tokens = /`([^`\n]+)`|\[\[([^\]\n]+)\]\]|\*\*([^*\n]+)\*\*|\*([^*\n]+)\*|(^|[\s(])#([\p{L}\p{N}_/-]+)/gu;
   function references(text) {
     // Code examples must not create pages, tags or backlinks.
@@ -2551,6 +2555,27 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     snapshot() { return structuredClone({ pages: this.pages, blocks: this.blocks, settings: this.settings }); }
     page(id) { return this.pages.find(p => p.id === id); }
     block(id) { return this.blocks.find(b => b.id === id); }
+    ensureRepere(id) {
+      const block = this.block(id); if (!block) throw new Error('Bloc introuvable.');
+      if (block.repere) return block.repere;
+      const alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+      const hex = id.replace(/-/g,'');
+      let number = /^[\da-f]+$/i.test(hex) ? BigInt('0x' + hex) : BigInt([...id].reduce((hash,c)=>Math.imul(hash^c.charCodeAt(0),16777619)>>>0,2166136261));
+      let suffix = '';
+      do { suffix = alphabet[Number(number % BigInt(alphabet.length))] + suffix; number /= BigInt(alphabet.length); } while (number);
+      suffix = suffix.padStart(3,alphabet[0]);
+      const created = new Date(block.createdAt), date = Number.isFinite(created.getTime()) ? dateKey(created) : this.page(block.pageId).journalDate || dateKey();
+      const prefix = date.slice(2).replace(/-/g,'') + '-';
+      const used = new Set(this.blocks.flatMap(blockReperes));
+      let length = 3, candidate = prefix + suffix.slice(0,length);
+      while (used.has(candidate)) {
+        length++;
+        if (length > suffix.length) suffix += alphabet[(length-1)%alphabet.length];
+        candidate = prefix + suffix.slice(0,length);
+      }
+      block.repere = candidate; block.updatedAt = new Date().toISOString(); this.page(block.pageId).updatedAt = block.updatedAt;
+      return candidate;
+    }
     ensurePage(title, journalDate = null) {
       title = title.trim().normalize('NFC');
       if (!title) throw new Error('Le nom de page est vide.');
@@ -2705,6 +2730,8 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       const visible = this.visible(first.pageId).map(x => x.block.id);
       if (visible[visible.indexOf(firstId) + 1] !== secondId) return null;
       const cursor = first.text.length;
+      const reperes = [...new Set([...blockReperes(first),...blockReperes(second)])];
+      if (reperes.length) { first.repere = reperes[0]; if (reperes.length > 1) first.repereAliases = reperes.slice(1); }
       this.setText(firstId, first.text + second.text);
       const siblings = this.children(second.pageId, second.parentId), position = siblings.indexOf(second);
       const children = this.children(second.pageId, secondId);
@@ -2734,7 +2761,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
   function validate(data) {
     const fail = message => { throw new Error('Sauvegarde invalide : ' + message); };
     if (!data || data.format !== 'miniseq' || data.version !== 1 || !Array.isArray(data.pages) || !Array.isArray(data.blocks)) fail('format ou version non reconnu.');
-    const pages = new Map(), blocks = new Map(), names = new Set();
+    const pages = new Map(), blocks = new Map(), names = new Set(), reperes = new Set();
     const goodId = id => typeof id === 'string' && /^[\w-]{1,100}$/.test(id);
     for (const p of data.pages) {
       if (!p || !goodId(p.id) || pages.has(p.id) || typeof p.title !== 'string' || !p.title.trim() || names.has(key(p.title))) fail('pages dupliquées ou incorrectes.');
@@ -2743,7 +2770,9 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     }
     for (const b of data.blocks) {
       if (!b || !goodId(b.id) || blocks.has(b.id) || !pages.has(b.pageId) || typeof b.text !== 'string' || !Number.isSafeInteger(b.order) || b.order < 0 || typeof b.collapsed !== 'boolean' || !(b.parentId === null || goodId(b.parentId))) fail('bloc incorrect.');
-      blocks.set(b.id, { ...(typeof b.createdAt === 'string' && Number.isFinite(Date.parse(b.createdAt)) ? {createdAt:b.createdAt} : {}), ...(typeof b.updatedAt === 'string' && Number.isFinite(Date.parse(b.updatedAt)) ? { updatedAt: b.updatedAt } : {}), ...(['incident-resolution','incident-problem','incident-solution','incident-check'].includes(b.role) ? {role:b.role} : {}), ...(typeof b.icon === 'string' && b.icon.length <= 16 ? { icon: b.icon } : {}), ...(['', 'yellow', 'red', 'pink', 'green', 'blue', 'purple', 'gray'].includes(b.color) ? { color: b.color } : {}), id: b.id, text: b.text, pageId: b.pageId, parentId: b.parentId, order: b.order, collapsed: b.collapsed });
+      if ((b.repere !== undefined && !validRepere(b.repere)) || (b.repereAliases !== undefined && (!Array.isArray(b.repereAliases) || !b.repere || !b.repereAliases.every(validRepere)))) fail('repère incorrect.');
+      for (const repere of [b.repere,...(b.repereAliases || [])].filter(Boolean)) { if (reperes.has(repere)) fail('repère dupliqué.'); reperes.add(repere); }
+      blocks.set(b.id, { ...(b.repere ? {repere:b.repere} : {}), ...(b.repereAliases?.length ? {repereAliases:[...b.repereAliases]} : {}), ...(typeof b.createdAt === 'string' && Number.isFinite(Date.parse(b.createdAt)) ? {createdAt:b.createdAt} : {}), ...(typeof b.updatedAt === 'string' && Number.isFinite(Date.parse(b.updatedAt)) ? { updatedAt: b.updatedAt } : {}), ...(['incident-resolution','incident-problem','incident-solution','incident-check'].includes(b.role) ? {role:b.role} : {}), ...(typeof b.icon === 'string' && b.icon.length <= 16 ? { icon: b.icon } : {}), ...(['', 'yellow', 'red', 'pink', 'green', 'blue', 'purple', 'gray'].includes(b.color) ? { color: b.color } : {}), id: b.id, text: b.text, pageId: b.pageId, parentId: b.parentId, order: b.order, collapsed: b.collapsed });
     }
     const visited = new Set();
     for (const b of blocks.values()) {
@@ -2775,7 +2804,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     if (typeof data.settings?.recentsCollapsed === 'boolean') settings.recentsCollapsed = data.settings.recentsCollapsed;
     return { pages: [...pages.values()], blocks: [...blocks.values()], settings };
   }
-  const api = { Graph, key, dateKey, validDate, tokens, references, validate };
+  const api = { Graph, key, dateKey, validDate, validRepere, blockReperes, tokens, references, validate };
   if (typeof module !== 'undefined') module.exports = api;
   else root.MiniSeq = api;
 })(globalThis);
@@ -3044,8 +3073,23 @@ SOFTWARE.
 (function (root) {
   'use strict';
   const marked = typeof module !== 'undefined' ? require('../vendor/marked/marked.umd.js') : root.marked;
-  const { key } = typeof module !== 'undefined' ? require('./model') : root.MiniSeq;
+  const { key, validRepere, blockReperes } = typeof module !== 'undefined' ? require('./model') : root.MiniSeq;
   const withoutFinalNewlines = text => text.replace(/\n+$/, '');
+  function readReperes(node) {
+    const lines = node.text.split('\n'), match = lines.at(-1).match(/^<!-- miniseq-reperes:(.*?) -->$/);
+    if (!match) return node;
+    let fence = null;
+    for (const line of lines.slice(0,-1)) {
+      const marker = line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if (marker) { if (!fence) fence = marker[1]; else if (marker[1][0]===fence[0] && marker[1].length>=fence.length) fence=null; }
+    }
+    if (fence) return node;
+    const refs = match[1].split(',');
+    if (!refs.length || !refs.every(validRepere) || new Set(refs).size!==refs.length) throw Error('Repère Markdown invalide.');
+    node.text = lines.slice(0,-1).join('\n'); node.repere = refs[0];
+    if (refs.length>1) node.repereAliases=refs.slice(1);
+    return node;
+  }
   function parse(source, filename = 'Note.md') {
     source = String(source).replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
     if (!source.trim()) throw new Error('Le fichier Markdown est vide.');
@@ -3074,7 +3118,7 @@ SOFTWARE.
           }
           node.text = withoutFinalNewlines(node.text);
           if (item.task) node.text = (item.checked ? 'DONE ' : 'TODO ') + node.text;
-          result.push(node);
+          result.push(readReperes(node));
         }
       }
       return result;
@@ -3095,6 +3139,7 @@ SOFTWARE.
     while (stack.length) {
       const {block, depth} = stack.pop(), text = block.text.split('\n'), indent = '  '.repeat(depth);
       lines.push(indent + '- ' + text[0], ...text.slice(1).map(line => indent + '  ' + line));
+      if (block.repere) lines.push(indent+'  <!-- miniseq-reperes:'+blockReperes(block).join(',')+' -->');
       for (const child of graph.children(page.id, block.id).reverse()) stack.push({block: child, depth: depth + 1});
     }
     return lines.join('\n') + '\n';
@@ -3183,6 +3228,7 @@ SOFTWARE.
     return tokens;
   }
   const searchKey = value => key(String(value)).normalize('NFD').replace(/\p{M}/gu, '');
+  const textMatches = (text, value) => M.validRepere(value.toUpperCase()) ? new RegExp('\\b'+value+'(?![a-z0-9])','i').test(text) : searchKey(text).includes(searchKey(value));
   function textExpression(text) {
     return tokenize(text).map(token => ['AND','OR','NOT','(',')','-'].includes(token.toUpperCase()) ? token.toUpperCase() : token.startsWith('"') ? token : JSON.stringify(token)).join(' ');
   }
@@ -3222,12 +3268,12 @@ SOFTWARE.
           return c => normalized === 'none' ? !c.meta.deadline : !c.meta.deadline ? false : normalized === 'today' ? c.meta.deadline === c.today : normalized === 'overdue' ? c.meta.deadline < c.today && !['DONE', 'CANCELED'].includes(c.meta.status) : normalized === 'soon' ? c.meta.deadline >= c.today && c.meta.deadline <= c.soon && !['DONE', 'CANCELED'].includes(c.meta.status) : c.meta.deadline === value;
         }
         if (field === 'page') return c => key(c.page.title) === normalized;
-        if (field === 'text') return c => key(c.text).includes(normalized);
+        if (field === 'text') return c => textMatches(c.text,normalized);
         if (field === 'person') return c => mentions(c.text).includes(normalized.replace(/^@/,''));
         if (field === 'tag') return c => c.tags.has(normalized);
         return c => key(c.properties[field] || '') === normalized;
       }
-      const value = searchKey(unquote(term)); return c => value === '*' || searchKey(c.text).includes(value);
+      const value = searchKey(unquote(term)); return c => value === '*' || textMatches(c.text,value);
     }
     function and() {
       let predicate = atom();
@@ -3263,7 +3309,7 @@ SOFTWARE.
       if (this.contexts.has(block.id)) return this.contexts.get(block.id);
       const tags = new Set(), links = new Set(); let b = block;
       while (b) { const refs = this.refs.get(b.id); refs.tags.forEach(t => tags.add(key(t))); refs.links.forEach(t => links.add(key(t))); b = this.blocks.get(b.parentId); }
-      const context = { block, page: this.graph.page(block.pageId), text: block.text, tags, links, meta: this.meta.get(block.id), today: this.today, soon: this.soon,
+      const context = { block, page: this.graph.page(block.pageId), text: [block.text,...M.blockReperes(block)].join('\n'), tags, links, meta: this.meta.get(block.id), today: this.today, soon: this.soon,
         properties: { ...this.pageProperties.get(block.pageId), ...this.meta.get(block.id).properties } };
       this.contexts.set(block.id, context); return context;
     }
@@ -3273,7 +3319,7 @@ SOFTWARE.
         const candidates = mode === 'pages' ? this.graph.pages.map(page => {
           const properties = this.pageProperties.get(page.id), refs = references(Object.values(properties).join('\n'));
           return { kind: 'page', page, text: page.title, properties, meta: metadata(Object.entries(properties).map(([k,v]) => `${k}::${v}`).join('\n')), tags: new Set(refs.tags.map(key)), links: new Set(refs.links.map(key)), today: this.today, soon: this.soon };
-        }) : this.graph.blocks.filter(b => b.id !== excludeId && queryText(b.text) === null && b.text.trim()).map(b => ({ ...this.context(b), kind: 'block' }));
+        }) : this.graph.blocks.filter(b => b.id !== excludeId && (b.repere || queryText(b.text) === null && b.text.trim())).map(b => ({ ...this.context(b), kind: 'block' }));
         const results = candidates.filter(predicate).sort((a, b) =>
           (a.meta.deadline || '9999').localeCompare(b.meta.deadline || '9999') || (a.meta.priority || 'Z').localeCompare(b.meta.priority || 'Z') || a.page.title.localeCompare(b.page.title) || (a.block?.order || 0) - (b.block?.order || 0));
         return { results, error: null };
@@ -3358,7 +3404,18 @@ const Storage = {
     status.dataset.state = 'saved';
     if (status.textContent !== 'Sauvegarde auto') status.textContent = 'Sauvegarde auto';
   }
-  function notice(message) { $('#notice').textContent = message; $('#notice').hidden = !message; }
+  let noticeTimer;
+  function notice(message, {action = null, timeout = 0} = {}) {
+    clearTimeout(noticeTimer);
+    const host = $('#notice'); host.replaceChildren(); host.hidden = !message;
+    host.setAttribute('role', action ? 'status' : 'alert');
+    if (action) {
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'notice-copy';
+      button.textContent = message; button.title = 'Cliquer pour recopier le repère'; button.onclick = action;
+      host.append(button);
+    } else host.textContent = message;
+    if (timeout && message) noticeTimer = setTimeout(() => { host.hidden = true; }, timeout);
+  }
   function changed() {
     if (revision === savedRevision) dirtySince = performance.now();
     revision++; $('#save-status').dataset.state = 'pending';
@@ -3462,7 +3519,7 @@ const Storage = {
   function taskExpression() { return [taskFilter.state, taskFilter.deadline, taskFilter.priority].filter(Boolean).join(' '); }
   function optionHTML(options, selected) { return options.map(([value, label]) => `<option value="${esc(value)}" ${value === selected ? 'selected' : ''}>${esc(label)}</option>`).join(''); }
   function blockRows(results) {
-    return results.filter(r => r.block).map(r => ({ id: r.block.id, title: r.block.text.split('\n')[0].replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?:[ \t]+\[#[ABC]\])?[ \t]*/, ''),
+    return results.filter(r => r.block).map(r => ({ id: r.block.id, reperes:MiniSeq.blockReperes(r.block).join(' '), title: r.block.text.split('\n')[0].replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?:[ \t]+\[#[ABC]\])?[ \t]*/, ''),
       page: r.page.title, pageId: r.page.id, status: r.meta.status || '', priority: r.meta.priority || '', deadline: r.meta.deadline || '', tags: [...r.tags].sort().map(t => '#' + t).join(' '), people: MiniQuery.mentions(r.block.text).map(p=>'@'+p).join(' '), created:r.block.createdAt||'', updated:r.block.updatedAt||'', closed:r.meta.properties.closed||'' }));
   }
   function blockColumns() {
@@ -4085,7 +4142,7 @@ const Storage = {
     completion = null;
     if (!activeId) return;
     const b = graph.block(activeId);
-    if (b && !b.text.trim() && !b.icon && !b.color && b.id !== view.rootId && !graph.children(b.pageId, b.id).length) {
+    if (b && !b.text.trim() && !b.icon && !b.color && !b.repere && b.id !== view.rootId && !graph.children(b.pageId, b.id).length) {
       const visible = graph.visible(b.pageId);
       if (visible.at(-1)?.block.id === b.id && graph.blocks.some(other => other.pageId === b.pageId && other.id !== b.id && other.text.trim())) {
         graph.blocks = graph.blocks.filter(other => other.id !== b.id);
@@ -4579,7 +4636,7 @@ const Storage = {
         try {
           finishEdit();
           const candidate = new Graph(graph.snapshot());
-          let first;
+          let first, remapped = 0;
           for (const plan of plans) {
             // Build the entire import before changing the live graph; recheck conflicting titles.
             const page = candidate.ensurePage(MiniMarkdownFiles.uniqueTitle(plan.title, candidate.pages.map(p => p.title)));
@@ -4587,12 +4644,18 @@ const Storage = {
             const stack = plan.blocks.slice().reverse().map(node => ({node, parentId: null}));
             while (stack.length) {
               const {node, parentId} = stack.pop(), block = candidate.add(page.id, parentId, null, node.text);
+              if (node.repere) {
+                const occupied = new Set(candidate.blocks.filter(b=>b.id!==block.id).flatMap(MiniSeq.blockReperes));
+                const refs = MiniSeq.blockReperes(node);
+                if (refs.some(ref=>occupied.has(ref))) { candidate.ensureRepere(block.id); remapped++; }
+                else { block.repere = node.repere; if (node.repereAliases?.length) block.repereAliases = [...node.repereAliases]; }
+              }
               for (const child of node.children.slice().reverse()) stack.push({node: child, parentId: block.id});
             }
           }
           checkpoint(); graph = candidate;
           changed(); dialog.close(); openPage(first.id);
-          notice(`${plans.length} page${plans.length > 1 ? 's' : ''} Markdown importée${plans.length > 1 ? 's' : ''}.`);
+          notice(`${plans.length} page${plans.length > 1 ? 's' : ''} Markdown importée${plans.length > 1 ? 's' : ''}.${remapped ? ' '+remapped+' repère(s) déjà utilisé(s) : de nouveaux repères ont été attribués aux copies.' : ''}`);
         } catch (error) { notice('Import Markdown impossible : ' + error.message); }
       };
     } catch (error) { notice('Import Markdown impossible : ' + error.message); }
@@ -4675,6 +4738,19 @@ const Storage = {
     const d = new Date(graph.page(view.id).journalDate + 'T12:00:00'); d.setDate(d.getDate() + delta); openJournal(dateKey(d));
   }
   let blockMenu = null;
+  async function copyBlockRepere(id) {
+    finishEdit(); const block = graph.block(id); if (!block) return;
+    if (!block.repere) { checkpoint(); graph.ensureRepere(id); changed(); }
+    const repere = block.repere; closeBlockMenu();
+    try {
+      if (!navigator.clipboard?.writeText) throw Error('Copie manuelle');
+      await navigator.clipboard.writeText(repere);
+      notice('Repère copié : '+repere+' · Cliquer pour recopier', {action:()=>copyBlockRepere(id),timeout:3000});
+    } catch {
+      showDialog('Copier le repère', `<p>Copiez ce repère avec Ctrl+C, puis recherchez-le pour retrouver la ligne.</p><input id="block-repere-copy" aria-label="Repère de la ligne" readonly value="${esc(repere)}">`);
+      $('#block-repere-copy').focus(); $('#block-repere-copy').select();
+    }
+  }
   function closeBlockMenu() { blockMenu?.remove(); blockMenu = null; }
   function floatingMenu(rect, title) {
     closeBlockMenu(); finishEdit();
@@ -4717,6 +4793,7 @@ const Storage = {
     for (const icon of ['⭐', '💡', '❓', '📌', '⚠️', '✅', '📅', '']) menuButton(icons, icon || 'Sans icône', () => apply(b => { b.icon = icon; }));
     menuButton(menu, '📌 Épingler à une page / projet…', () => choosePin(id));
     menuButton(menu, 'Définir un statut…', () => showStatusMenu(id, bullet.getBoundingClientRect()));
+    menuButton(menu, graph.block(id).repere ? 'Copier le repère · '+graph.block(id).repere : 'Copier le repère', () => copyBlockRepere(id)).dataset.copyRepere = id;
     menu.querySelector('button').focus();
   });
   let draggedBlock = null, dropTarget = null, suppressBulletClickUntil = 0;
