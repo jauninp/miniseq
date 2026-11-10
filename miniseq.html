@@ -32,6 +32,10 @@
 #notice:has(.notice-copy){padding:0}
 #notice .notice-copy{display:block;width:100%;padding:10px 14px;text-align:left;font:inherit;border-radius:0}
 .rendered{white-space:normal}
+.rendered :is(h1,h2,h3,h4,h5,h6){border-bottom:1px solid var(--line);padding-bottom:5px;margin-bottom:5px}
+.note-heading{border-bottom:1px solid var(--line);padding-bottom:12px}
+.pages-toolbar .pages-hide-done{display:flex;align-items:center;gap:7px;align-self:center;font-size:12px;cursor:pointer}
+.pages-hide-done input{width:auto;accent-color:var(--accent)}
 .table-columns{position:relative;margin-left:auto;color:var(--ink)}
 .table-columns summary{cursor:pointer;border:1px solid var(--line);border-radius:5px;padding:6px 10px;white-space:nowrap}
 .table-column-choices{position:absolute;right:0;top:100%;min-width:200px;max-height:55vh;overflow:auto;padding:8px;background:var(--bg);border:1px solid var(--line);border-radius:6px;box-shadow:0 5px 18px #0002;z-index:20}
@@ -206,7 +210,7 @@
     <div class="sidebar-bottom">
       <button data-action="help">? &nbsp; Guide & raccourcis</button>
       <button data-action="backup">↥ &nbsp; Sauvegardes</button>
-      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.10.17.1</div>
+      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.11.10.1</div>
     </div>
   </aside>
   <div class="workspace">
@@ -2654,6 +2658,20 @@ if(__exports != exports)module.exports = exports;return module.exports}));
       siblings.splice(siblings.indexOf(target), 0, added); this.normalize(siblings);
       return added;
     }
+    rootAfter(id) {
+      const block = this.block(id); if (!block) return null;
+      let root = block;
+      while (root.parentId) root = this.block(root.parentId);
+      const roots = this.children(block.pageId), next = roots[roots.indexOf(root)+1];
+      if (!block.text.trim() && !this.children(block.pageId,id).length) {
+        if (!block.parentId) return block;
+        const siblings = this.children(block.pageId,block.parentId).filter(b=>b.id!==id);
+        block.parentId = null; roots.splice(roots.indexOf(root)+1,0,block);
+        this.normalize(siblings); this.normalize(roots); return block;
+      }
+      if (next && !next.text.trim() && !next.icon && !next.repere && !this.children(block.pageId,next.id).length) return next;
+      return this.add(block.pageId,null,root.id,'');
+    }
     enter(id, start, end = start) {
       const b = this.block(id), children = this.children(b.pageId, id);
       const siblings = this.children(b.pageId, b.parentId);
@@ -2839,6 +2857,7 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     if (Array.isArray(data.settings?.favorites)) settings.favorites = [...new Set(data.settings.favorites.filter(id => typeof id === 'string' && pages.has(id)))];
     if (data.settings?.pageDatesInitialized === true) settings.pageDatesInitialized = true;
     if (typeof data.settings?.recentsCollapsed === 'boolean') settings.recentsCollapsed = data.settings.recentsCollapsed;
+    if (typeof data.settings?.hideCompletedPages === 'boolean') settings.hideCompletedPages = data.settings.hideCompletedPages;
     return { pages: [...pages.values()], blocks: [...blocks.values()], settings };
   }
   const api = { Graph, key, dateKey, validDate, validRepere, blockReperes, tokens, references, validate };
@@ -3757,10 +3776,15 @@ const Storage = {
     const statusFilter = document.createElement('label'); statusFilter.innerHTML = `Statut<select id="pages-status">${optionHTML([['all','Tous'],['current','Hors archives'],['archived','Archives']],pagesView.status)}</select>`;
     $('.pages-toolbar').append(statusFilter);
     $('#pages-status').addEventListener('change', e => { pagesView.status = e.target.value; refreshPages(); });
+    const hideDone = document.createElement('label'); hideDone.className = 'pages-hide-done';
+    const hideDoneInput = document.createElement('input'); hideDoneInput.type = 'checkbox'; hideDoneInput.id = 'pages-hide-done'; hideDoneInput.checked = !!graph.settings.hideCompletedPages;
+    hideDone.append(hideDoneInput,'Masquer les pages terminées'); $('.pages-toolbar').append(hideDone);
+    hideDoneInput.onchange = () => { graph.settings.hideCompletedPages = hideDoneInput.checked; changed(); refreshPages(); };
     pageTable = MiniTables.mount('#pages-table', 'pages', [
       { title: 'Nom de la page', field: 'title', minWidth: 240, widthGrow: 3, sorter: 'string', sorterParams: { locale: 'fr' }, formatter: cell => MiniTables.action(cell.getValue(), 'data-page', cell.getRow().getData().id) },
       { title: 'Références', field: 'links', sorter: 'number', hozAlign: 'right' },
       { title: 'Blocs', field: 'blocks', sorter: 'number', hozAlign: 'right' },
+      { title: 'Tâches ouvertes', field: 'openTasks', sorter: 'number', hozAlign: 'right', minWidth:145, formatter:cell=>MiniTables.action(String(cell.getValue()),'data-page-tasks',cell.getRow().getData().id,'Voir les tâches ouvertes de cette page et de ses notes liées') },
       { title: 'Type', field: 'kind' },
       { title: 'Statut', field: 'status' },
       {title:'Création',field:'created',minWidth:165,formatter:dateCell},
@@ -3797,6 +3821,11 @@ const Storage = {
   function pageRows() {
     const pages = listedPages();
     const blockCounts = new Map(), linkCounts = new Map();
+    const openCounts = new Map(), pageIds = new Map(graph.pages.map(page=>[key(page.title),page.id]));
+    for (const result of index().run('task:open').results) {
+      const targets = new Set([result.block.pageId,...[...result.links].map(title=>pageIds.get(title)).filter(Boolean)]);
+      for (const pageId of targets) openCounts.set(pageId,(openCounts.get(pageId)||0)+1);
+    }
     for (const b of graph.blocks) {
       blockCounts.set(b.pageId, (blockCounts.get(b.pageId) || 0) + 1);
       if (MiniQuery.queryText(b.text) !== null) continue;
@@ -3807,10 +3836,11 @@ const Storage = {
       const project = key(index().pageProperties.get(page.id)?.type || '') === 'project';
       const statusKey = key(index().pageProperties.get(page.id)?.status || '');
       return { id: page.id, title: page.title, blocks: blockCounts.get(page.id) || 0, links: linkCounts.get(key(page.title)) || 0,
+        openTasks:openCounts.get(page.id)||0,
         statusKey, status: projectStates.find(([value])=>value===statusKey)?.[1] || statusKey,
         created:page.createdAt||'', updated:[page.updatedAt||'',...graph.blocks.filter(b=>b.pageId===page.id).map(b=>b.updatedAt||'')].sort().at(-1)||'', properties:Object.entries(page.properties||{}).map(([k,v])=>k+': '+v).join(' · '), kind: page.journalDate ? 'Journal' : page.properties?.type || (project ? 'Projet' : 'Page'), project, journal: !!page.journalDate };
     }).filter(row => (pagesView.kind === 'all' || pagesView.kind === 'pages' && !row.journal || pagesView.kind === 'journals' && row.journal || pagesView.kind === 'projects' && row.project));
-    const filtered = rows.filter(row => pagesView.status === 'all' || (pagesView.status === 'archived' ? row.statusKey === 'archived' : row.statusKey !== 'archived'));
+    const filtered = rows.filter(row => (!graph.settings.hideCompletedPages || row.statusKey !== 'done') && (pagesView.status === 'all' || (pagesView.status === 'archived' ? row.statusKey === 'archived' : row.statusKey !== 'archived')));
     $('#pages-count').textContent = `${filtered.length} pages sur ${pages.length}`;
     return filtered;
   }
@@ -4253,6 +4283,7 @@ const Storage = {
   function editorKey(e, id) {
     if (e.isComposing || e.keyCode === 229) return;
     const input = e.target, b = graph.block(id), start = input.selectionStart, end = input.selectionEnd;
+    if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key === 'Enter') { e.preventDefault(); insertRootAfter(id); return; }
     const plainKey = !e.metaKey && ((!e.ctrlKey && !e.altKey) || e.getModifierState('AltGraph'));
     if (plainKey && e.key === '[') {
       e.preventDefault();
@@ -4334,6 +4365,7 @@ const Storage = {
         { name: 'query', label: 'Requête dynamique', text: '{{query task:open}}' },
         { name: 'deadline', label: 'Relance · choisir une date au clavier', action: 'reminder' },
         { name: 'rappel', label: 'Rappel · choisir une date au clavier', action: 'reminder' },
+        { name: 'racine', label: 'Nouvelle puce à la racine · Ctrl+Entrée', action: 'root' },
         { name: 'priority', label: 'Priorité haute', text: 'priority::A' },
         { name: 'code', label: 'Bloc de code · indiquez le langage après ```', text: '```\n\n```', cursor: 3 },
         { name: 'calc', label: 'Calculs · résultats à droite', text: '```calc\n\n```', cursor: 8 }
@@ -4355,10 +4387,23 @@ const Storage = {
   function applyCompletion(input, selected) {
     if (!completion) return;
     const { id, items, from, to } = completion, item = items[selected];
+    if (item.action === 'root') { dismissCompletions(input); insertRootAfter(id,{from,to}); return; }
     if (item.action === 'reminder') { dismissCompletions(input); reminderDate(id,from,to,input.selectionStart); return; }
     checkpoint(); input.setRangeText(item.text, from, to, 'end');
     if (item.cursor !== undefined) input.setSelectionRange(from + item.cursor, from + item.cursor);
     graph.setText(id, input.value); changed(); syncCodeEditor(input); resize(input); dismissCompletions(input); input.focus();
+  }
+  function insertRootAfter(id, command = null) {
+    const block = graph.block(id); if (!block) return;
+    checkpoint();
+    if (command) {
+      graph.setText(id,block.text.slice(0,command.from)+block.text.slice(command.to));
+      const input = activeHost?.querySelector('.editor'); if (input) { input.value = block.text; syncCodeEditor(input); resize(input); }
+    }
+    const openFullPage = !!view.rootId || !!activeHost?.closest('.reference-blocks,#pinned-blocks');
+    const next = graph.rootAfter(id); changed();
+    if (openFullPage) openPage(block.pageId,next.id);
+    else renderBlocks(next.id,0);
   }
   function reminderDate(id, from, to, cursor) {
     const host = activeHost, block = graph.block(id); if (!block) return;
@@ -4949,6 +4994,7 @@ const Storage = {
     else if (d.taskReviewed) markTaskReviewed(d.taskReviewed);
     else if (d.reviewActions) reviewActions(d.reviewActions,el.getBoundingClientRect());
     else if (d.taskDetails) taskDetails(d.taskDetails);
+    else if (d.pageTasks) { const page = graph.page(d.pageTasks); if (page) { explorerQuery = 'task:open (page:'+JSON.stringify(page.title)+' OR [['+page.title+']])'; searchMode = 'query'; search(); } }
     else if (d.queryExample) { explorerQuery = d.queryExample; searchMode='auto'; $('#global-search').value=explorerQuery;syncSearchClear();$('#search-input').value=explorerQuery;$('#search-mode').value=searchMode;refreshSearch(); }
     else if (d.task) showStatusMenu(d.task, el.getBoundingClientRect());
     else if (d.fold) { toggleFold(d.fold, el); renderBlocks(); }
