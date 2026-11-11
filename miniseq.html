@@ -32,6 +32,40 @@
 #notice:has(.notice-copy){padding:0}
 #notice .notice-copy{display:block;width:100%;padding:10px 14px;text-align:left;font:inherit;border-radius:0}
 .rendered{white-space:normal}
+.day-plan{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:24px;margin:22px 0}
+.day-overview{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted);margin:12px 0}
+.day-overview button{color:var(--accent);border:1px solid var(--line)}
+.day-section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:12px 0}
+#day-content h2{font-size:16px;margin:0}
+#day-content h2 small{font-size:12px;color:var(--muted);font-weight:400}
+.day-card{border:1px solid var(--line);border-radius:7px;padding:8px 10px;margin:8px 0;background:var(--bg);min-width:0}
+.day-card-main{border-left:3px solid #e87924;background:#fffaf3}
+.day-card-actions{display:flex;flex-wrap:wrap;gap:4px;border-top:1px solid var(--line);padding-top:6px;margin-top:5px}
+.day-card-actions button,.day-section-heading button{font-size:12px;padding:5px 7px}
+.day-card-actions button:first-child{color:var(--accent);font-weight:600}
+.day-reasons{display:flex;flex-wrap:wrap;gap:5px;margin:5px 26px}
+.day-reasons span{font-size:11px;color:#6d603f;background:#f4efdf;border-radius:4px;padding:3px 6px;overflow-wrap:anywhere}
+.day-resume-note{font-size:13px;margin:8px 24px;line-height:1.6;color:#665238}
+.day-resume{padding:12px;border:1px solid #e3cfb7;border-radius:7px;background:#fff9f1;margin:18px 0}
+.day-suggestions{margin:26px 0}
+.day-secondary{border-top:1px solid var(--line);padding:12px 0;margin:6px 0}
+.day-secondary summary{cursor:pointer;font-size:13px;color:var(--muted);margin-bottom:8px}
+.day-old>button{font-size:12px;margin:5px 24px}
+.day-previous{font-size:12px;color:var(--muted)}
+#day-main-note,#day-interrupt-note{width:100%;display:block;margin:7px 0;padding:10px;border:1px solid var(--line);border-radius:5px;background:var(--bg);color:var(--ink);font:inherit;font-size:14px}
+#day-context-form label{display:block;margin:12px 0;font-size:13px}
+#day-picker-results{max-height:55vh;overflow:auto;margin-top:10px}
+.result-fold,.result-fold-slot{width:18px;flex:0 0 18px}
+.result-fold{padding:4px 0;font-size:11px;color:var(--muted)}
+.result-children{margin-left:19px;padding-left:10px;border-left:1px solid var(--line)}
+.result-branch>.query-result{min-width:0}
+.result-branch .result{min-width:0}
+.result-branch .excerpt{white-space:pre-wrap;overflow-wrap:anywhere}
+.table-tree{white-space:normal;min-width:0}
+.table-tree .query-result{gap:3px;align-items:flex-start}
+.table-tree .result{padding:3px 0;border:0}
+.table-tree .excerpt{font-size:13px;line-height:1.5}
+.table-tree .task-metadata{white-space:normal}
 .rendered :is(h1,h2,h3,h4,h5,h6){border-bottom:1px solid var(--line);padding-bottom:5px;margin-bottom:5px}
 .note-heading{border-bottom:1px solid var(--line);padding-bottom:12px}
 .pages-toolbar .pages-hide-done{display:flex;align-items:center;gap:7px;align-self:center;font-size:12px;cursor:pointer}
@@ -210,7 +244,7 @@
     <div class="sidebar-bottom">
       <button data-action="help">? &nbsp; Guide & raccourcis</button>
       <button data-action="backup">↥ &nbsp; Sauvegardes</button>
-      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.11.10.1</div>
+      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.11.11.2</div>
     </div>
   </aside>
   <div class="workspace">
@@ -312,7 +346,7 @@
     });
     current = controller; return controller;
   }
-  root.MiniTables = { mount, destroy, action, configure: options => { settings = options; } };
+  root.MiniTables = { mount, destroy, action, resizeRow:id=>{const row=current?.table.getRow(id);if(row)row.normalizeHeight();}, configure: options => { settings = options; } };
 })(globalThis);
 </script>
   <script>/**
@@ -2858,6 +2892,10 @@ if(__exports != exports)module.exports = exports;return module.exports}));
     if (data.settings?.pageDatesInitialized === true) settings.pageDatesInitialized = true;
     if (typeof data.settings?.recentsCollapsed === 'boolean') settings.recentsCollapsed = data.settings.recentsCollapsed;
     if (typeof data.settings?.hideCompletedPages === 'boolean') settings.hideCompletedPages = data.settings.hideCompletedPages;
+    if(data.settings?.focusPlan&&validDate(data.settings.focusPlan.date)) {
+      const p=data.settings.focusPlan,ids=value=>Array.isArray(value)?[...new Set(value.filter(id=>blocks.has(id)))]:[];
+      settings.focusPlan={date:p.date,main:blocks.has(p.main)?p.main:null,next:ids(p.next).filter(id=>id!==p.main).slice(0,2),done:ids(p.done).slice(0,100),resumeId:blocks.has(p.resumeId)?p.resumeId:null};
+    }
     return { pages: [...pages.values()], blocks: [...blocks.values()], settings };
   }
   const api = { Graph, key, dateKey, validDate, validRepere, blockReperes, tokens, references, validate };
@@ -3386,6 +3424,68 @@ SOFTWARE.
   if (typeof module !== 'undefined') module.exports = api; else root.MiniQuery = api;
 })(globalThis);
 </script>
+  <script>/* Daily choices are explicit. Suggestions use only recorded facts, with visible reasons. */
+(function(root){
+  'use strict';
+  const M=typeof module!=='undefined'?require('./model'):root.MiniSeq;
+  const Q=typeof module!=='undefined'?require('./query'):root.MiniQuery;
+  const open=meta=>['BACKLOG','TODO','DOING','REVIEW','QUESTION','WAITING'].includes(meta.status);
+  function plan(graph,today=M.dateKey()) {
+    const saved=graph.settings.focusPlan;
+    return saved?.date===today?structuredClone(saved):{date:today,main:null,next:[],done:[],resumeId:saved?.resumeId||null};
+  }
+  function setProperties(text,patch) {
+    let fence=null;
+    const lines=text.split('\n').filter(line=>{
+      const marker=line.match(/^ {0,3}(`{3,}|~{3,})/);
+      if(marker){if(!fence)fence=marker[1];else if(marker[1][0]===fence[0]&&marker[1].length>=fence.length)fence=null;return true;}
+      const name=line.match(/^([\p{L}\w-]+)::/u)?.[1];
+      return fence||!name||!Object.hasOwn(patch,M.key(name));
+    });
+    if(fence)throw Error('Fermez le bloc de code avant d’ajouter une propriété.');
+    for(const [name,value]of Object.entries(patch))if(String(value).trim())lines.push(name+'::'+String(value).trim().replace(/\s*\n\s*/g,' '));
+    return lines.join('\n');
+  }
+  function build(graph,today=M.dateKey(),idx=new Q.Index(graph,today)) {
+    const saved=plan(graph,today),days=date=>Math.max(0,Math.floor((Date.parse(today+'T12:00:00Z')-Date.parse(date+'T12:00:00Z'))/86400000));
+    const projects=new Map(graph.pages.filter(p=>M.key(idx.pageProperties.get(p.id)?.type||'')==='project').map(p=>[M.key(p.title),p]));
+    const rows=idx.run('task:open').results.map(row=>{
+      const props=idx.pageProperties.get(row.page.id)||{},linked=[...row.links].map(name=>projects.get(name)).filter(Boolean);
+      if(M.key(props.type||'')==='project')linked.push(row.page);
+      const archived=p=>['done','canceled','archived'].includes(M.key(idx.pageProperties.get(p.id)?.status||''));
+      const inactive=archived(row.page)||(linked.length>0&&linked.every(archived));
+      const activity=row.block.updatedAt?.slice(0,10)||row.block.createdAt?.slice(0,10)||row.page.journalDate;
+      const age=M.validDate(activity)?days(activity):null;
+      const reasons=[];let score=0;
+      const engagement=row.meta.properties.engagement;
+      if(M.validDate(engagement)) {const due=engagement<=today;score+=due?120:70;reasons.push(due?'Engagement à tenir : '+engagement:'Engagement le '+engagement);}
+      if(row.meta.properties.bloque){score+=85;reasons.push('Débloque : '+row.meta.properties.bloque);}
+      if(row.meta.priority==='A'){score+=60;reasons.push('Priorité A');}else if(row.meta.priority==='B')score+=20;
+      if(row.meta.properties.enjeu)reasons.push('Enjeu : '+row.meta.properties.enjeu);
+      if(linked.length){score+=25;if(age!==null&&age>=7){score+=15;reasons.push('Action de projet sans suivi depuis '+age+' jours');}else reasons.push('Avance un projet');}
+      if(row.meta.deadline&&row.meta.deadline<=today){score+=30;reasons.push(row.meta.deadline<today?'Relance dépassée':'Relance aujourd’hui');}
+      if(row.meta.status==='DOING'){score+=10;reasons.push('Déjà en cours');}
+      if(!reasons.length)reasons.push(age!==null&&age>=14?'Sans suivi depuis '+age+' jours':'À évaluer selon son importance');
+      return {...row,inactive,age,score,reasons};
+    });
+    const byId=new Map(rows.map(r=>[r.block.id,r]));
+    const actionable=id=>{const r=byId.get(id);return r&&!r.inactive&&r.meta.status!=='WAITING'?r:null;};
+    const main=actionable(saved.main),next=(saved.next||[]).map(actionable).filter(r=>r&&r.block.id!==main?.block.id).slice(0,2),resume=actionable(saved.resumeId);
+    const selected=new Set([main?.block.id,...next.map(r=>r.block.id),resume?.block.id].filter(Boolean));
+    const candidates=rows.filter(r=>!r.inactive&&r.meta.status!=='WAITING');
+    const suggestions=candidates.filter(r=>{
+      const reviewed=r.meta.properties.reviewed,recent=M.validDate(reviewed)&&reviewed<=today&&days(reviewed)<14;
+      const due=r.meta.deadline&&r.meta.deadline<=today,engagement=r.meta.properties.engagement,committed=M.validDate(engagement)&&engagement<=today;
+      return !selected.has(r.block.id)&&(!r.meta.deadline||r.meta.deadline<=today)&&(!recent||due||committed);
+    }).sort((a,b)=>b.score-a.score||(b.age||0)-(a.age||0)||a.block.id.localeCompare(b.block.id));
+    const old=candidates.filter(r=>!selected.has(r.block.id)&&!r.meta.deadline&&r.age>=14&&Q.reviewInfo(r.block,r.page,today)).sort((a,b)=>b.age-a.age).slice(0,3);
+    const due=rows.filter(r=>r.meta.deadline&&r.meta.deadline<=today).sort((a,b)=>a.meta.deadline.localeCompare(b.meta.deadline));
+    const done=(saved.done||[]).map(id=>graph.block(id)).filter(b=>b&&Q.metadata(b.text).status==='DONE');
+    return {plan:saved,previous:graph.settings.focusPlan?.date!==today?graph.settings.focusPlan:null,main,next,resume,candidates,suggestions:suggestions.slice(0,5),old,due,done};
+  }
+  const api={plan,build,setProperties};if(typeof module!=='undefined')module.exports=api;else root.MiniDay=api;
+})(globalThis);
+</script>
   <script>'use strict';
 const Storage = {
   db: null,
@@ -3444,6 +3544,7 @@ const Storage = {
   MiniTables.configure({ getWidths: name => graph?.settings.tableWidths?.[name], saveWidths: (name, widths) => { graph.settings.tableWidths ||= {}; graph.settings.tableWidths[name] = widths; changed(); }, getLayout:name=>graph?.settings.tableLayouts?.[name], saveLayout:(name,layout)=>{graph.settings.tableLayouts ||= {};graph.settings.tableLayouts[name]=layout;changed();} });
   let draggedFavorite = null, favoriteDropTarget = null, suppressFavoriteClickUntil = 0;
   let pageTable = null, blockTable = null;
+  const expandedResults = new Set();
   const taskStates = [['BACKLOG', 'Backlog', '▤'], ['TODO', 'À faire', '○'], ['DOING', 'En cours', '◐'], ['REVIEW', 'En revue', '↪'], ['QUESTION', 'Question', '？'], ['WAITING', 'En attente', '◷'], ['DONE', 'Terminé', '✓'], ['CANCELED', 'Annulé', '⊗']];
   const taskIcon = status => taskStates.find(s => s[0] === status)?.[2] || '○';
   const taskLabel = status => taskStates.find(s => s[0] === status)?.[1] || status;
@@ -3538,14 +3639,33 @@ const Storage = {
     const date = meta.deadline ? new Date(meta.deadline + 'T12:00:00').toLocaleDateString('fr-CH', { day: 'numeric', month: 'short', year: 'numeric' }) : '';
     return `<span class="task-metadata ${below && meta.deadline ? 'task-metadata-below' : ''}"><button class="task-badges ${meta.deadline ? 'scheduled-pill' : ''}" data-task-details="${block.id}" title="${overdue ? 'Relance dépassée · ' : ''}Modifier la priorité et la relance">${meta.priority ? `<span class="priority priority-${meta.priority}">${meta.priority}</span>` : ''}${meta.deadline ? `<span>Relance : <span class="deadline ${overdue ? 'overdue' : ''}">${esc(date)}</span></span>` : ''}${meta.properties.closed ? `<span class="closed-date">Terminé le ${esc(meta.properties.closed)}</span>` : ''}<span class="task-adjust" aria-hidden="true">${meta.deadline ? '✎' : '⚙'}</span></button></span>`;
   }
+  function resultBranch(result, {source = true, controls = true, person = false, brief = false} = {}) {
+    const b = result.block, meta = index().meta.get(b.id) || MiniQuery.metadata(b.text);
+    const children = graph.children(b.pageId,b.id), expanded = children.length && expandedResults.has(b.id);
+    let text = taskDisplayText(b.text).replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)(?:[ \t]+\[#[ABC]\])?[ \t]*/,'');
+    if (brief) text = text.split('\n')[0];
+    return `<div class="result-branch" data-result-root="${b.id}" data-result-source="${source}" data-result-controls="${controls}" data-result-person="${person}" data-result-brief="${brief}"><div class="query-result" data-result-block="${b.id}"${person?` data-person-block="${b.id}"`:''}>${children.length?`<button class="result-fold" data-result-toggle="${b.id}" aria-expanded="${!!expanded}" aria-label="${expanded?'Replier':'Déplier'} les sous-blocs">${expanded?'▼':'▶'}</button>`:'<span class="result-fold-slot"></span>'}${controls?(meta.status?`<button class="task-toggle status-${meta.status}" data-task="${b.id}" aria-label="Définir le statut : ${esc(taskLabel(meta.status))}">${taskIcon(meta.status)}</button>`:'<span class="query-dot">•</span>'):''}<button class="result" data-jump="${b.id}">${source?`<span class="source">${esc(pageLabel(result.page))}</span>`:''}<span class="excerpt ${['DONE','CANCELED'].includes(meta.status)?'done-text':''}">${esc(text || '(bloc vide)')}</span></button>${controls&&meta.status?taskBadges(b):''}</div><div class="result-children"${expanded?'':' hidden'}>${expanded?children.map(child=>resultBranch({block:child,page:graph.page(child.pageId)},{source:false,controls:true,person})).join(''):''}</div></div>`;
+  }
+  function toggleResult(id) {
+    if (expandedResults.has(id)) expandedResults.delete(id); else expandedResults.add(id);
+    document.querySelectorAll(`[data-result-root="${id}"]`).forEach(host=>{
+      const b = graph.block(id); if (!b) return;
+      const tableOwner = host.closest('[data-table-owner]')?.dataset.tableOwner;
+      const focused = host.contains(document.activeElement);
+      const replacement = document.createElement('div');
+      replacement.innerHTML = resultBranch({block:b,page:graph.page(b.pageId)},{source:host.dataset.resultSource==='true',controls:host.dataset.resultControls==='true',person:host.dataset.resultPerson==='true',brief:host.dataset.resultBrief==='true'});
+      const branch = replacement.firstElementChild; host.replaceWith(branch);
+      if (focused) branch.querySelector('[data-result-toggle]')?.focus({preventScroll:true});
+      if (tableOwner) MiniTables.resizeRow(tableOwner);
+    });
+  }
   function queryResults(expression, owner = null) {
     const { results, error } = index().run(expression, owner);
     if (error) return `<p class="query-error" role="status">${esc(error)}</p>`;
     if (!results.length) return '<p class="empty">Aucun résultat pour ces critères.</p>';
     return `<div class="query-count">${results.length} résultat${results.length > 1 ? 's' : ''}${results.length > 200 ? ' · 200 affichés, affinez la requête' : ''}</div>` + results.slice(0, 200).map(result => {
       if (result.kind === 'page') return `<button class="result" data-page="${result.page.id}"><span class="source">PAGE</span><span class="excerpt">${esc(result.page.title)}</span></button>`;
-      const b = result.block, meta = result.meta;
-      return `<div class="query-result" data-result-block="${b.id}">${meta.status ? `<button class="task-toggle" data-task="${b.id}" title="Changer l’état">${taskIcon(meta.status)}</button>` : '<span class="query-dot">•</span>'}<button class="result" data-jump="${b.id}"><span class="source">${esc(pageLabel(result.page))}</span><span class="excerpt ${meta.status === 'DONE' ? 'done-text' : ''}">${esc(b.text.split('\n')[0])}</span></button>${meta.status ? taskBadges(b) : ''}</div>`;
+      return resultBranch(result);
     }).join('');
   }
   function refreshReminders() {
@@ -3571,6 +3691,7 @@ const Storage = {
     renderDayPages();
     renderProjectTasks();
     refreshPerson();
+    if ($('#day-content')) refreshDay();
     if ($('#people-table')) blockTable?.replace(peopleRows());
   }
   function taskExpression() { return [taskFilter.state, taskFilter.deadline, taskFilter.priority].filter(Boolean).join(' '); }
@@ -3581,7 +3702,10 @@ const Storage = {
   }
   function blockColumns() {
     return [
-      { title: 'Bloc', field: 'title', minWidth: 250, widthGrow: 3, formatter: cell => MiniTables.action(cell.getValue() || '(bloc vide)', 'data-jump', cell.getRow().getData().id, 'Ouvrir le bloc d’origine') },
+      { title: 'Bloc', field: 'title', minWidth: 250, widthGrow: 3, variableHeight:true, formatter: cell => {
+        const b=graph.block(cell.getRow().getData().id); if (!b) return '';
+        return `<div class="table-tree" data-table-owner="${b.id}">${resultBranch({block:b,page:graph.page(b.pageId)},{source:false,controls:false})}</div>`;
+      } },
       { title: 'Page', field: 'page', minWidth: 150, formatter: cell => MiniTables.action(cell.getValue(), 'data-page', cell.getRow().getData().pageId) },
       { title: 'État', field: 'status', width: 110, formatter: cell => { const status = cell.getValue(); return MiniTables.action(status ? `${taskIcon(status)} ${taskLabel(status)}` : '—', status ? 'data-task' : 'data-task-details', cell.getRow().getData().id, status ? 'Changer l’état du bloc d’origine' : 'Transformer en tâche'); } },
       { title: 'Priorité', field: 'priority', width: 105, sorter: 'string', sorterParams: { alignEmptyValues: 'bottom' }, formatter: cell => MiniTables.action(cell.getValue() || '—', 'data-task-details', cell.getRow().getData().id, 'Modifier la priorité') },
@@ -3629,6 +3753,7 @@ const Storage = {
     blockTable = MiniTables.mount('#tag-blocks', 'tag-blocks', blockColumns(), blockRows(directTagResults()), [{ column: 'page', dir: 'asc' }]);
   }
   function renderTasks() {
+    if(tasksMode==='day'){renderDay();return;}
     if(tasksMode==='waiting'){renderWaitingTasks();return;}
     if(tasksMode==='review'){renderReviewTasks();return;}
     $('#crumb').textContent = 'Tâches';
@@ -3636,7 +3761,80 @@ const Storage = {
     blockTable = MiniTables.mount('#task-results', 'tasks', blockColumns(), blockRows(index().run(taskExpression()).results), [{ column: 'deadline', dir: 'asc' }, { column: 'priority', dir: 'asc' }]);
   }
   function taskTabs() {
-    return `<nav class="task-tabs" aria-label="Vues des tâches"><button data-action="tasks-all" aria-pressed="${tasksMode==='all'}">Toutes les tâches</button><button data-action="tasks-review" aria-pressed="${tasksMode==='review'}">Relance</button><button data-action="tasks-waiting" aria-pressed="${tasksMode==='waiting'}">En attente</button></nav>`;
+    return `<nav class="task-tabs" aria-label="Vues des tâches"><button data-action="tasks-day" aria-pressed="${tasksMode==='day'}">Ma journée</button><button data-action="tasks-all" aria-pressed="${tasksMode==='all'}">Toutes les tâches</button><button data-action="tasks-review" aria-pressed="${tasksMode==='review'}">Relance</button><button data-action="tasks-waiting" aria-pressed="${tasksMode==='waiting'}">En attente</button></nav>`;
+  }
+  function renderDay() {
+    $('#crumb').textContent='Tâches · Ma journée';
+    $('#main').innerHTML=`<h1>Ma journée</h1>${taskTabs()}<p class="page-subtitle">Une priorité, deux actions ensuite. Les suggestions vous aident à choisir ; les relances gardent leur propre date.</p><div id="day-content"></div>`;
+    refreshDay();
+  }
+  const dayButton=(label,action,id)=>`<button data-day-${action}="${id}">${label}</button>`;
+  function dayCard(row,kind) {
+    const id=row.block.id;
+    let buttons=kind==='main'?(row.meta.status==='DOING'?'':dayButton('Commencer','start',id))+dayButton('Interrompre / noter où reprendre','interrupt',id):dayButton(kind==='resume'?'Reprendre':'Ma priorité',kind==='resume'?'resume':'main',id);
+    if(kind==='suggestion')buttons+=dayButton('Ensuite','next',id);
+    if(['main','next'].includes(kind))buttons+=dayButton('✓ Terminer','done',id)+dayButton('Attendre une réponse','waiting',id);
+    buttons+=dayButton('Préciser l’enjeu','context',id);
+    if(['main','next','resume'].includes(kind))buttons+=dayButton('Retirer de cette sélection','remove',id);
+    return `<article class="day-card day-card-${kind}" data-day-block="${id}">${resultBranch(row,{brief:true})}${kind==='suggestion'?`<div class="day-reasons">${row.reasons.slice(0,3).map(reason=>`<span>${esc(reason)}</span>`).join('')}</div>`:''}${row.meta.properties.reprise?`<p class="day-resume-note"><strong>Reprendre :</strong> ${esc(row.meta.properties.reprise)}</p>`:''}<div class="day-card-actions">${buttons}</div></article>`;
+  }
+  function refreshDay() {
+    const host=$('#day-content');if(!host)return;
+    const day=MiniDay.build(graph,dateKey(),index()),opened=new Set([...host.querySelectorAll('details[open]')].map(el=>el.dataset.daySection));
+    const section=(name,title,content)=>`<details class="day-secondary" data-day-section="${name}"${opened.has(name)?' open':''}><summary>${title}</summary>${content}</details>`;
+    host.innerHTML=`<p class="day-overview"><span>${esc(new Date(dateKey()+'T12:00:00').toLocaleDateString('fr-CH',{weekday:'long',day:'numeric',month:'long'}))}</span><button data-day-show-due="true">${day.due.length} relance${day.due.length>1?'s':''} à traiter</button></p>${day.previous&&(day.previous.main||day.previous.next?.length)?`<p class="day-previous">Votre sélection du ${esc(day.previous.date)} reste disponible. <button data-action="carry-day-plan">Reprendre cette sélection</button></p>`:''}<div class="day-plan"><section class="day-main"><div class="day-section-heading"><h2>Ma priorité</h2><button data-action="choose-day-main">Choisir une tâche</button></div>${day.main?dayCard(day.main,'main'):'<p class="empty">Quel pas concret ferait avancer votre journée ?</p>'}</section><section><div class="day-section-heading"><h2>Ensuite <small>${day.next.length}/2</small></h2><button data-action="choose-day-next">Choisir une tâche</button></div>${day.next.length?day.next.map(row=>dayCard(row,'next')).join(''):'<p class="empty">Deux actions au maximum, si le temps le permet.</p>'}</section></div>${day.resume&&day.resume.block.id!==day.main?.block.id?`<section class="day-resume"><h2>À reprendre</h2>${dayCard(day.resume,'resume')}</section>`:''}<section class="day-suggestions"><div class="day-section-heading"><h2>Quelques pistes pour choisir</h2><button data-action="choose-day-main">Chercher dans toutes mes tâches</button></div><p class="empty">Propositions selon les informations renseignées. Une date de relance n’est pas une échéance d’engagement.</p>${day.suggestions.length?day.suggestions.map(row=>dayCard(row,'suggestion')).join(''):'<p class="empty">Aucune autre suggestion pour le moment. Vous pouvez choisir librement une tâche.</p>'}</section>${section('due',`Relances arrivées à date · ${day.due.length}`,day.due.length?day.due.map(row=>resultBranch(row)).join(''):'<p class="empty">Aucune relance à traiter.</p>')}${section('old',`Anciennes tâches à réexaminer · ${day.old.length}`,day.old.length?day.old.map(row=>`<div class="day-old">${resultBranch(row)}<button data-task-reviewed="${row.block.id}">Revue · me la reproposer dans 14 jours</button></div>`).join(''):'<p class="empty">Aucune ancienne tâche à réexaminer pour le moment.</p>')}${section('done',`Fait aujourd’hui dans ma sélection · ${day.done.length}`,day.done.map(block=>resultBranch({block,page:graph.page(block.pageId)})).join('')||'<p class="empty">Les actions terminées depuis cette vue apparaîtront ici.</p>')}`;
+  }
+  function changeDay(change) {
+    checkpoint();const plan=MiniDay.plan(graph);change(plan);graph.settings.focusPlan=plan;changed();refreshDay();
+  }
+  function chooseDayMain(id,start=false) {
+    const row=MiniDay.build(graph,dateKey(),index()).candidates.find(row=>row.block.id===id);if(!row)return;
+    const current=MiniDay.build(graph,dateKey(),index()).main;
+    const apply=note=>{
+      dialog.close();changeDay(plan=>{
+        if(current&&current.block.id!==id){if(note)graph.setText(current.block.id,MiniDay.setProperties(current.block.text,{reprise:note}));plan.resumeId=current.block.id;}
+        plan.main=id;plan.next=(plan.next||[]).filter(other=>other!==id);
+        if(start){graph.setText(id,MiniQuery.updateTask(row.block.text,{status:'DOING',priority:row.meta.priority||'',deadline:row.meta.deadline||''}));if(plan.resumeId===id)plan.resumeId=null;}
+      });
+    };
+    if(current&&current.block.id!==id){
+      showDialog('Changer ma priorité',`<form id="day-main-form"><p><strong>${esc(current.block.text.split('\n')[0])}</strong> sera gardée dans « À reprendre ».</p><p>Nouvelle priorité : ${esc(row.block.text.split('\n')[0])}</p><label>Où reprendre la tâche interrompue ?<textarea id="day-main-note" rows="3">${esc(current.meta.properties.reprise||'')}</textarea></label><div class="dialog-actions"><button type="button" data-action="close">Annuler</button><button class="primary">Changer ma priorité</button></div></form>`);
+      $('#day-main-form').onsubmit=e=>{e.preventDefault();try{apply($('#day-main-note').value);}catch(error){notice(error.message);}};
+    }else apply('');
+  }
+  function chooseDayNext(id,replaceId=null) {
+    const day=MiniDay.build(graph,dateKey(),index());if(!day.candidates.some(row=>row.block.id===id))return;
+    if(day.main?.block.id===id||day.next.some(row=>row.block.id===id)){notice('Cette tâche est déjà sélectionnée pour aujourd’hui.');return;}
+    if(day.next.length===2&&!replaceId){showDialog('Quelle action remplacer ?',`<p>Deux actions sont déjà choisies. L’action remplacée restera dans vos tâches.</p>${day.next.map(row=>`<button class="result" data-day-replace-next="${id}" data-replace-id="${row.block.id}">${esc(row.block.text.split('\n')[0])}</button>`).join('')}`);return;}
+    dialog.close();changeDay(plan=>{plan.next=day.next.map(row=>row.block.id).filter(other=>other!==replaceId);plan.next.push(id);});
+  }
+  function chooseDayTask(slot) {
+    showDialog('Choisir '+(slot==='main'?'ma priorité':'une action ensuite'),'<input id="day-picker-search" type="search" aria-label="Chercher une tâche" placeholder="Chercher une tâche ou un projet…"><div id="day-picker-results"></div>');
+    const paint=()=>{
+      const filter=MiniQuery.textFilter($('#day-picker-search').value),rows=MiniDay.build(graph,dateKey(),index()).candidates.filter(row=>filter.matches(row.block.text+' '+row.page.title));
+      $('#day-picker-results').innerHTML=rows.slice(0,60).map(row=>`<button class="result" data-day-${slot}="${row.block.id}"><span class="source">${esc(row.page.title)}</span><span class="excerpt">${esc(row.block.text.split('\n')[0])}</span></button>`).join('')||'<p class="empty">Aucune tâche correspondante.</p>';
+    };$('#day-picker-search').oninput=paint;paint();$('#day-picker-search').focus();
+    $('#day-picker-search').onkeydown=e=>{if(e.key==='ArrowDown'){e.preventDefault();$('#day-picker-results button')?.focus();}};
+    $('#day-picker-results').onkeydown=e=>{
+      if(e.key==='Enter'&&e.target.matches('button')){e.preventDefault();e.target.click();return;}
+      if(!['ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();
+      const buttons=[...e.currentTarget.querySelectorAll('button')],at=buttons.indexOf(document.activeElement);
+      buttons[(at+(e.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();
+    };
+  }
+  function interruptDay(id) {
+    const block=graph.block(id);if(!block)return;
+    showDialog('Garder un point de reprise',`<form id="day-interrupt-form"><p>${esc(block.text.split('\n')[0])}</p><label>Où reprendre ?<textarea id="day-interrupt-note" rows="3" placeholder="Ce qui est vérifié et le prochain geste à faire…">${esc(MiniQuery.metadata(block.text).properties.reprise||'')}</textarea></label><div class="dialog-actions"><button type="button" data-action="close">Annuler</button><button class="primary">Garder pour reprendre</button></div></form>`);
+    $('#day-interrupt-form').onsubmit=e=>{e.preventDefault();const note=$('#day-interrupt-note').value;try{const text=MiniDay.setProperties(block.text,{reprise:note});dialog.close();changeDay(plan=>{graph.setText(id,text);plan.resumeId=id;if(plan.main===id)plan.main=null;plan.next=plan.next.filter(other=>other!==id);});}catch(error){notice(error.message);}};
+  }
+  function dayContext(id) {
+    const block=graph.block(id);if(!block)return;const props=MiniQuery.metadata(block.text).properties;
+    showDialog('Ce qui rend cette tâche importante',`<form id="day-context-form"><p>${esc(block.text.split('\n')[0])}</p><label>Engagement à tenir avant le<input id="day-engagement" type="date" value="${validDate(props.engagement)?props.engagement:''}"></label><label>Qui ou quoi est bloqué ?<input id="day-blocked" value="${esc(props.bloque||'')}" placeholder="@Daniel, la mise en production…"></label><label>Conséquence si cela attend<input id="day-stakes" value="${esc(props.enjeu||'')}" placeholder="Un engagement client, un risque, un gain attendu…"></label><p class="empty">Ces informations sont facultatives et restent dans la note. L’engagement est distinct de votre date de relance.</p><div class="dialog-actions"><button type="button" data-action="close">Annuler</button><button class="primary">Enregistrer</button></div></form>`);
+    $('#day-context-form').onsubmit=e=>{e.preventDefault();try{const text=MiniDay.setProperties(block.text,{engagement:$('#day-engagement').value,bloque:$('#day-blocked').value,enjeu:$('#day-stakes').value});checkpoint();graph.setText(id,text);changed();dialog.close();refreshDay();}catch(error){notice(error.message);}};
+  }
+  function finishDayTask(id) {
+    const block=graph.block(id);if(!block)return;const meta=MiniQuery.metadata(block.text);
+    changeDay(plan=>{graph.setText(id,MiniQuery.updateTask(block.text,{status:'DONE',priority:meta.priority||'',deadline:meta.deadline||''}));plan.done=[...new Set([...plan.done,id])].slice(-100);if(plan.main===id)plan.main=null;if(plan.resumeId===id)plan.resumeId=null;plan.next=plan.next.filter(other=>other!==id);});
   }
   function renderWaitingTasks() {
     $('#crumb').textContent='Tâches · En attente';
@@ -3659,7 +3857,7 @@ const Storage = {
       {...columns[0],formatter:cell=>{
         const row=cell.getRow().getData(),host=document.createElement('div'),source=document.createElement('small');
         source.className='review-source';source.textContent=row.page+' · '+taskLabel(row.status);
-        host.append(MiniTables.action(row.title,'data-jump',row.id),source);return host;
+        host.innerHTML=columns[0].formatter(cell);host.append(source);return host;
       }},{title:'Pourquoi elle remonte',field:'reason',minWidth:210,widthGrow:2},
       columns[3],columns[4],
       {title:'Créée le',field:'created',visible:false},
@@ -3850,7 +4048,7 @@ const Storage = {
     return new Date(page.journalDate + 'T12:00:00').toLocaleDateString('fr-CH', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   }
   function resultsHTML(blocks) {
-    return blocks.map(b => `<button class="result" data-jump="${b.id}"><span class="source">${esc(pageLabel(graph.page(b.pageId)))}</span><span class="excerpt">${esc(b.text || '(bloc vide)')}</span></button>`).join('');
+    return blocks.map(b => resultBranch({block:b,page:graph.page(b.pageId)})).join('');
   }
   function renderSidebar() {
     refreshReminders();
@@ -4601,7 +4799,7 @@ const Storage = {
   }
   let personLimit=40;
   function personResults(rows, empty) {
-    return rows.map(r=>`<div class="query-result" data-person-block="${r.block.id}">${r.meta.status?`<button class="task-toggle status-${r.meta.status}" data-task="${r.block.id}" aria-label="Définir le statut : ${esc(taskLabel(r.meta.status))}">${taskIcon(r.meta.status)}</button>`:'<span class="query-dot">•</span>'}<button class="result" data-jump="${r.block.id}"><span class="source">${esc(pageLabel(r.page))}</span><span class="excerpt ${['DONE','CANCELED'].includes(r.meta.status)?'done-text':''}">${esc(taskDisplayText(r.block.text).replace(/^(BACKLOG|TODO|DOING|REVIEW|QUESTION|WAITING|DONE|CANCELED)\s+/,''))}</span></button>${r.meta.status?taskBadges(r.block):''}</div>`).join('') || `<p class="empty">${empty}</p>`;
+    return rows.map(r=>resultBranch(r,{person:true})).join('') || `<p class="empty">${empty}</p>`;
   }
   function refreshPerson() {
     if(!$('#person-tasks'))return;
@@ -4781,6 +4979,10 @@ const Storage = {
   }
   const actions = {
     people: () => { view={type:'people'};render(); },
+    'tasks-day': () => {tasksMode='day';render();},
+    'choose-day-main':()=>chooseDayTask('main'),
+    'choose-day-next':()=>chooseDayTask('next'),
+    'carry-day-plan':()=>{const previous=graph.settings.focusPlan;if(previous&&previous.date!==dateKey())changeDay(plan=>{plan.main=previous.main;plan.next=[...previous.next];plan.resumeId=previous.resumeId;plan.done=[];});},
     'tasks-all': () => {tasksMode='all';render();},
     'tasks-waiting': () => {tasksMode='waiting';render();},
     'tasks-review': () => {tasksMode='review';render();},
@@ -4876,6 +5078,7 @@ const Storage = {
     for (const icon of ['⭐', '💡', '❓', '📌', '⚠️', '✅', '📅', '']) menuButton(icons, icon || 'Sans icône', () => apply(b => { b.icon = icon; }));
     menuButton(menu, '📌 Épingler à une page / projet…', () => choosePin(id));
     menuButton(menu, 'Définir un statut…', () => showStatusMenu(id, bullet.getBoundingClientRect()));
+    if(['BACKLOG','TODO','DOING','REVIEW','QUESTION'].includes(MiniQuery.metadata(graph.block(id).text).status))menuButton(menu,'Choisir comme priorité du jour',()=>{closeBlockMenu();tasksMode='day';view={type:'tasks'};render();chooseDayMain(id);});
     menuButton(menu, graph.block(id).repere ? 'Copier le repère · '+graph.block(id).repere : 'Copier le repère', () => copyBlockRepere(id)).dataset.copyRepere = id;
     const created = new Date(graph.block(id).createdAt), info = document.createElement('div'); info.className = 'block-created';
     if (Number.isFinite(created.getTime())) {
@@ -4978,7 +5181,18 @@ const Storage = {
     const el = e.target.closest('button, [data-edit]'); if (!el) return;
     if (el.matches('.favorite-link') && performance.now()<suppressFavoriteClickUntil) { e.preventDefault(); return; }
     const d = el.dataset;
-    if (d.action) actions[d.action]?.();
+    if (d.dayShowDue) {const section=$('[data-day-section="due"]');if(section){section.open=true;section.scrollIntoView({block:'nearest'});}}
+    else if (d.dayMain) chooseDayMain(d.dayMain);
+    else if (d.dayNext) chooseDayNext(d.dayNext);
+    else if (d.dayReplaceNext) chooseDayNext(d.dayReplaceNext,d.replaceId);
+    else if (d.dayStart || d.dayResume) chooseDayMain(d.dayStart||d.dayResume,true);
+    else if (d.dayInterrupt) interruptDay(d.dayInterrupt);
+    else if (d.dayContext) dayContext(d.dayContext);
+    else if (d.dayDone) finishDayTask(d.dayDone);
+    else if (d.dayRemove) changeDay(plan=>{if(plan.main===d.dayRemove)plan.main=null;if(plan.resumeId===d.dayRemove)plan.resumeId=null;plan.next=plan.next.filter(id=>id!==d.dayRemove);});
+    else if (d.dayWaiting) {taskDetails(d.dayWaiting);$('#detail-state').value='WAITING';$('#detail-deadline').focus();}
+    else if (d.resultToggle) toggleResult(d.resultToggle);
+    else if (d.action) actions[d.action]?.();
     else if (d.page || d.pageName || d.jump) {
       dialog.close();
       if (d.jump) openBlock(d.jump);
