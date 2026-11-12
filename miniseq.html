@@ -244,7 +244,7 @@
     <div class="sidebar-bottom">
       <button data-action="help">? &nbsp; Guide & raccourcis</button>
       <button data-action="backup">↥ &nbsp; Sauvegardes</button>
-      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.11.11.2</div>
+      <div class="local-note" aria-label="Version de MiniSeq">MiniSeq · v2026.11.12.1</div>
     </div>
   </aside>
   <div class="workspace">
@@ -309,8 +309,7 @@
     host.classList.add('notes-table');
     const table = new Tabulator(host, {
       data, index: 'id', layout: 'fitColumns', height: 'min(62vh, 640px)',
-      pagination: true, paginationMode: 'local', paginationSize: 25, paginationSizeSelector: [25, 50, 100],
-      paginationCounter: 'rows', movableColumns: true, placeholder: 'Aucun résultat pour ces critères.',
+      pagination: false, movableColumns: true, placeholder: 'Aucun résultat pour ces critères.',
       locale: 'fr', langs: { fr: { pagination: { page_size: 'Lignes', page_title: 'Page', first: 'Première', first_title: 'Première page', last: 'Dernière', last_title: 'Dernière page', prev: '‹', prev_title: 'Page précédente', next: '›', next_title: 'Page suivante', counter: { showing: 'Affichage', of: 'sur', rows: 'lignes', pages: 'pages' } }, headerFilters: { default: 'Filtrer…' } } },
       columnDefaults: { minWidth: 105, resizable: true, formatter: 'plaintext', headerFilter: false },
       columns, initialSort: saved?.sort || sort
@@ -3787,33 +3786,47 @@ const Storage = {
   function changeDay(change) {
     checkpoint();const plan=MiniDay.plan(graph);change(plan);graph.settings.focusPlan=plan;changed();refreshDay();
   }
-  function chooseDayMain(id,start=false) {
+  function chooseDayMain(id,start=false,afterChoose=null) {
     const row=MiniDay.build(graph,dateKey(),index()).candidates.find(row=>row.block.id===id);if(!row)return;
     const current=MiniDay.build(graph,dateKey(),index()).main;
     const apply=note=>{
-      dialog.close();changeDay(plan=>{
+      if(!afterChoose)dialog.close();changeDay(plan=>{
         if(current&&current.block.id!==id){if(note)graph.setText(current.block.id,MiniDay.setProperties(current.block.text,{reprise:note}));plan.resumeId=current.block.id;}
         plan.main=id;plan.next=(plan.next||[]).filter(other=>other!==id);
         if(start){graph.setText(id,MiniQuery.updateTask(row.block.text,{status:'DOING',priority:row.meta.priority||'',deadline:row.meta.deadline||''}));if(plan.resumeId===id)plan.resumeId=null;}
       });
+      afterChoose?.();
     };
     if(current&&current.block.id!==id){
       showDialog('Changer ma priorité',`<form id="day-main-form"><p><strong>${esc(current.block.text.split('\n')[0])}</strong> sera gardée dans « À reprendre ».</p><p>Nouvelle priorité : ${esc(row.block.text.split('\n')[0])}</p><label>Où reprendre la tâche interrompue ?<textarea id="day-main-note" rows="3">${esc(current.meta.properties.reprise||'')}</textarea></label><div class="dialog-actions"><button type="button" data-action="close">Annuler</button><button class="primary">Changer ma priorité</button></div></form>`);
       $('#day-main-form').onsubmit=e=>{e.preventDefault();try{apply($('#day-main-note').value);}catch(error){notice(error.message);}};
     }else apply('');
   }
-  function chooseDayNext(id,replaceId=null) {
+  function chooseDayNext(id,replaceId=null,afterChoose=null) {
     const day=MiniDay.build(graph,dateKey(),index());if(!day.candidates.some(row=>row.block.id===id))return;
     if(day.main?.block.id===id||day.next.some(row=>row.block.id===id)){notice('Cette tâche est déjà sélectionnée pour aujourd’hui.');return;}
-    if(day.next.length===2&&!replaceId){showDialog('Quelle action remplacer ?',`<p>Deux actions sont déjà choisies. L’action remplacée restera dans vos tâches.</p>${day.next.map(row=>`<button class="result" data-day-replace-next="${id}" data-replace-id="${row.block.id}">${esc(row.block.text.split('\n')[0])}</button>`).join('')}`);return;}
-    dialog.close();changeDay(plan=>{plan.next=day.next.map(row=>row.block.id).filter(other=>other!==replaceId);plan.next.push(id);});
+    if(day.next.length===2&&!replaceId){
+      showDialog('Quelle action remplacer ?',`<p>Deux actions sont déjà choisies. L’action remplacée restera dans vos tâches.</p>${day.next.map(row=>`<button class="result" data-day-replace-next="${id}" data-replace-id="${row.block.id}">${esc(row.block.text.split('\n')[0])}</button>`).join('')}`);
+      if(afterChoose)for(const button of dialog.querySelectorAll('[data-day-replace-next]'))button.onclick=e=>{e.stopPropagation();chooseDayNext(id,button.dataset.replaceId,afterChoose);};
+      return;
+    }
+    if(!afterChoose)dialog.close();changeDay(plan=>{plan.next=day.next.map(row=>row.block.id).filter(other=>other!==replaceId);plan.next.push(id);});
+    afterChoose?.();
   }
-  function chooseDayTask(slot) {
-    showDialog('Choisir '+(slot==='main'?'ma priorité':'une action ensuite'),'<input id="day-picker-search" type="search" aria-label="Chercher une tâche" placeholder="Chercher une tâche ou un projet…"><div id="day-picker-results"></div>');
+  function chooseDayTask(slot,search='') {
+    showDialog('Choisir '+(slot==='main'?'ma priorité':'une action ensuite'),'<input id="day-picker-search" type="search" aria-label="Chercher une tâche" placeholder="Chercher une tâche ou un projet…"><p class="empty">Les tâches déjà choisies sont masquées. Une priorité et deux actions ensuite.</p><div id="day-picker-results"></div><div class="dialog-actions"><button data-action="close">Fermer</button></div>');
+    $('#day-picker-search').value=search;
     const paint=()=>{
-      const filter=MiniQuery.textFilter($('#day-picker-search').value),rows=MiniDay.build(graph,dateKey(),index()).candidates.filter(row=>filter.matches(row.block.text+' '+row.page.title));
-      $('#day-picker-results').innerHTML=rows.slice(0,60).map(row=>`<button class="result" data-day-${slot}="${row.block.id}"><span class="source">${esc(row.page.title)}</span><span class="excerpt">${esc(row.block.text.split('\n')[0])}</span></button>`).join('')||'<p class="empty">Aucune tâche correspondante.</p>';
+      const day=MiniDay.build(graph,dateKey(),index()),selected=new Set([day.main?.block.id,day.resume?.block.id,...day.next.map(row=>row.block.id)]);
+      const filter=MiniQuery.textFilter($('#day-picker-search').value),rows=day.candidates.filter(row=>!selected.has(row.block.id)&&filter.matches(row.block.text+' '+row.page.title));
+      $('#day-picker-results').innerHTML=rows.map(row=>`<button class="result" data-day-${slot}="${row.block.id}"><span class="source">${esc(row.page.title)}</span><span class="excerpt">${esc(row.block.text.split('\n')[0])}</span></button>`).join('')||'<p class="empty">Aucune autre tâche correspondante.</p>';
     };$('#day-picker-search').oninput=paint;paint();$('#day-picker-search').focus();
+    $('#day-picker-results').onclick=e=>{
+      const button=e.target.closest('button');if(!button)return;
+      e.stopPropagation();const search=$('#day-picker-search').value,afterChoose=()=>chooseDayTask('next',search);
+      if(slot==='main')chooseDayMain(button.dataset.dayMain,false,afterChoose);
+      else chooseDayNext(button.dataset.dayNext,null,afterChoose);
+    };
     $('#day-picker-search').onkeydown=e=>{if(e.key==='ArrowDown'){e.preventDefault();$('#day-picker-results button')?.focus();}};
     $('#day-picker-results').onkeydown=e=>{
       if(e.key==='Enter'&&e.target.matches('button')){e.preventDefault();e.target.click();return;}
